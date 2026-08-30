@@ -24,7 +24,7 @@ export async function Navbar() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand */}
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.svg" alt="Valax Logo" className="h-9 w-9 rounded-lg shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform" />
             <div className="flex flex-col">
@@ -39,11 +39,11 @@ export async function Navbar() {
           <nav className="hidden md:flex items-center gap-1 text-sm font-medium text-slate-300">
             <Link href="/bbs" className="px-3 py-1.5 rounded-md hover:bg-slate-800 hover:text-white transition-colors flex items-center gap-1.5">
               <MessageSquare className="h-4 w-4 text-blue-400" />
-              BBS 论坛
+              BBS Community
             </Link>
             <Link href="/market" className="px-3 py-1.5 rounded-md hover:bg-slate-800 hover:text-white transition-colors flex items-center gap-1.5">
               <ShoppingBag className="h-4 w-4 text-emerald-400" />
-              数字市场
+              Marketplace
             </Link>
           </nav>
         </div>
@@ -56,7 +56,7 @@ export async function Navbar() {
               <Link
                 href="/wallet"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold hover:bg-amber-500/20 transition-all shadow-sm"
-                title="Valax Utility Credits (非金融站内积分)"
+                title="Valax Utility Credits (Non-financial platform credits)"
               >
                 <Coins className="h-3.5 w-3.5 text-amber-400" />
                 <span>{wallet?.balance ?? 0}</span>
@@ -70,7 +70,7 @@ export async function Navbar() {
                   className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-purple-950/60 border border-purple-700/50 text-purple-300 text-xs font-medium hover:bg-purple-900/60 transition-colors"
                 >
                   <Shield className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">管理后台</span>
+                  <span className="hidden sm:inline">Admin Panel</span>
                 </Link>
               )}
 
@@ -101,7 +101,7 @@ export async function Navbar() {
                   <button
                     type="submit"
                     className="p-1.5 rounded-md text-slate-400 hover:text-red-400 hover:bg-red-950/30 transition-colors"
-                    title="退出登录"
+                    title="Sign Out"
                   >
                     <LogOut className="h-4 w-4" />
                   </button>
@@ -114,7 +114,7 @@ export async function Navbar() {
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all"
             >
               <LogIn className="h-4 w-4" />
-              <span>Discord 登录</span>
+              <span>Login with Discord</span>
             </Link>
           )}
         </div>

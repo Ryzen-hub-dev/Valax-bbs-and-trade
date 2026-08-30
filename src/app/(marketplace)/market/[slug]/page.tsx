@@ -9,6 +9,8 @@ import { FadeIn } from "@/components/animations/gsap-wrapper";
 import { Github, ExternalLink, ShieldCheck, Tag, Code, Coins, FileText, CheckCircle2 } from "lucide-react";
 import { PurchaseButton } from "./purchase-button";
 
+export const dynamic = "force-dynamic";
+
 export default async function ProductDetailPage({
   params,
 }: {
@@ -51,7 +53,6 @@ export default async function ProductDetailPage({
 
   if (!product) notFound();
 
-  // Check purchase status
   let alreadyPurchased = false;
   let licenseKey = "";
   if (session) {
@@ -79,9 +80,8 @@ export default async function ProductDetailPage({
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-xs text-slate-400">
-        <Link href="/market" className="hover:text-white transition-colors">数字市场</Link>
+        <Link href="/market" className="hover:text-white transition-colors">Marketplace</Link>
         <span>/</span>
         <span className="text-emerald-400 font-medium">{product.category}</span>
         <span>/</span>
@@ -89,7 +89,6 @@ export default async function ProductDetailPage({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Details (Left 2 cols) */}
         <div className="lg:col-span-2 space-y-6">
           <FadeIn className="p-6 sm:p-8 rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl space-y-6">
             <div className="space-y-2">
@@ -103,16 +102,14 @@ export default async function ProductDetailPage({
               <p className="text-sm text-slate-300 leading-relaxed">{product.shortDescription}</p>
             </div>
 
-            {/* Description Body */}
             <div className="pt-6 border-t border-slate-800 space-y-4">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">商品与架构详情</h2>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Product Details & Architecture</h2>
               <SafeMarkdown content={product.description} />
             </div>
 
-            {/* Changelog */}
             {product.changelog && (
               <div className="pt-6 border-t border-slate-800 space-y-3">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">版本更新记录 (Changelog)</h2>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Version Changelog</h2>
                 <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
                   {product.changelog}
                 </div>
@@ -121,12 +118,10 @@ export default async function ProductDetailPage({
           </FadeIn>
         </div>
 
-        {/* Sidebar Info & Action (Right 1 col) */}
         <div className="space-y-6">
-          {/* Purchase Action Card */}
           <div className="p-6 rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl space-y-6">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">所需积分</span>
+              <span className="text-xs text-slate-400">Price</span>
               <div className="flex items-center gap-1.5 text-2xl font-black text-amber-400">
                 <Coins className="h-6 w-6 text-amber-400" />
                 <span>{product.tokenPrice}</span>
@@ -144,9 +139,8 @@ export default async function ProductDetailPage({
               githubReleaseUrl={product.githubReleaseUrl}
             />
 
-            {/* Verified External Links */}
             <div className="pt-4 border-t border-slate-800 space-y-2.5 text-xs">
-              <span className="font-semibold text-slate-300 block mb-2">安全交付与代码仓库</span>
+              <span className="font-semibold text-slate-300 block mb-2">Verified Repositories & Delivery</span>
               <a
                 href={product.githubReleaseUrl}
                 target="_blank"
@@ -169,7 +163,7 @@ export default async function ProductDetailPage({
                 >
                   <div className="flex items-center gap-2">
                     <Code className="h-4 w-4 text-blue-400" />
-                    <span>开源仓库 / 源码</span>
+                    <span>Open Source Repository</span>
                   </div>
                   <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
                 </a>
@@ -184,14 +178,13 @@ export default async function ProductDetailPage({
                 >
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-cyan-400" />
-                    <span>使用文档</span>
+                    <span>Documentation</span>
                   </div>
                   <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
                 </a>
               )}
             </div>
 
-            {/* Developer Card */}
             <div className="pt-4 border-t border-slate-800 flex items-center gap-3">
               {product.developer.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -206,7 +199,7 @@ export default async function ProductDetailPage({
                 </div>
               )}
               <div className="text-xs">
-                <div className="text-slate-400">开发者 / 发布者</div>
+                <div className="text-slate-400">Creator / Author</div>
                 <div className="font-bold text-slate-200">{product.developer.username}</div>
               </div>
             </div>

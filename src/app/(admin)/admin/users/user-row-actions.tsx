@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Shield, Ban, VolumeX, LogOut, Check } from "lucide-react";
+import { Shield, Ban, VolumeX, KeyRound, Check } from "lucide-react";
 
 export function UserRowActions({
   user,
@@ -16,73 +16,80 @@ export function UserRowActions({
   };
 }) {
   const router = useRouter();
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleAction = async (action: string, extra?: any) => {
-    if (!confirm(`确定执行操作 [${action}] 对用户 ${user.username} 吗？`)) return;
+  const handleAction = async (action: string) => {
+    if (!confirm(`Are you sure you want to perform "${action}" on user "${user.username}"?`)) return;
 
-    setIsProcessing(true);
+    setIsLoading(true);
     try {
-      await fetch("/api/admin/users", {
+      const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetUserId: user.id,
-          action,
-          ...extra,
-        }),
+        body: JSON.stringify({ userId: user.id, action }),
       });
+
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || "Action failed");
+      }
+
       router.refresh();
-    } catch {} finally {
-      setIsProcessing(false);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 justify-end">
       {user.isBanned ? (
         <button
-          disabled={isProcessing}
           onClick={() => handleAction("unban")}
-          className="px-2.5 py-1 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-700/50 text-[11px] font-semibold hover:bg-emerald-900/60"
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 hover:bg-emerald-900 transition-colors text-[11px] font-semibold"
         >
-          解封
+          Unban
         </button>
       ) : (
         <button
-          disabled={isProcessing}
-          onClick={() => handleAction("ban", { reason: "Admin Disciplinary Ban" })}
-          className="px-2.5 py-1 rounded bg-red-950/60 text-red-400 border border-red-700/50 text-[11px] font-semibold hover:bg-red-900/60"
+          onClick={() => handleAction("ban")}
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-red-950 border border-red-700 text-red-300 hover:bg-red-900 transition-colors text-[11px] font-semibold flex items-center gap-1"
         >
-          封禁
+          <Ban className="h-3 w-3" />
+          Ban
         </button>
       )}
 
       {user.isMuted ? (
         <button
-          disabled={isProcessing}
           onClick={() => handleAction("unmute")}
-          className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-[11px] hover:bg-slate-700"
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors text-[11px]"
         >
-          解禁言
+          Unmute
         </button>
       ) : (
         <button
-          disabled={isProcessing}
           onClick={() => handleAction("mute")}
-          className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-[11px] hover:bg-slate-700"
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 hover:bg-amber-900/60 transition-colors text-[11px] flex items-center gap-1"
         >
-          禁言
+          <VolumeX className="h-3 w-3" />
+          Mute
         </button>
       )}
 
       <button
-        disabled={isProcessing}
         onClick={() => handleAction("revoke_sessions")}
-        className="px-2.5 py-1 rounded bg-slate-800 text-slate-400 hover:text-amber-400 text-[11px]"
-        title="强制注销全部活跃会话"
+        disabled={isLoading}
+        className="px-2.5 py-1 rounded bg-purple-950/80 border border-purple-700/60 text-purple-300 hover:bg-purple-900/60 transition-colors text-[11px] flex items-center gap-1"
+        title="Revoke all active sessions immediately"
       >
-        注销会话
+        <KeyRound className="h-3 w-3" />
+        Kick
       </button>
     </div>
   );

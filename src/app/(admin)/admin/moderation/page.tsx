@@ -1,31 +1,32 @@
 import { db } from "@/db";
 import { reports, products, users } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
-import { AlertTriangle, ShoppingBag, ShieldCheck } from "lucide-react";
-import { ModRowActions } from "./mod-row-actions";
+import { eq, desc } from "drizzle-orm";
+import { Flag, ShoppingBag } from "lucide-react";
+import { ModerationRowActions } from "./mod-row-actions";
+
+export const dynamic = "force-dynamic";
 
 export default async function AdminModerationPage() {
-  const pendingReportsList = await db
+  const pendingReports = await db
     .select({
       id: reports.id,
       targetType: reports.targetType,
       targetId: reports.targetId,
       reason: reports.reason,
       details: reports.details,
-      status: reports.status,
       createdAt: reports.createdAt,
       reporter: { username: users.username },
     })
     .from(reports)
     .innerJoin(users, eq(reports.reporterId, users.id))
     .where(eq(reports.status, "pending"))
-    .orderBy(desc(reports.createdAt))
-    .limit(50);
+    .orderBy(desc(reports.createdAt));
 
   const pendingProducts = await db
     .select({
       id: products.id,
       title: products.title,
+      slug: products.slug,
       category: products.category,
       tokenPrice: products.tokenPrice,
       githubReleaseUrl: products.githubReleaseUrl,
@@ -35,45 +36,42 @@ export default async function AdminModerationPage() {
     .from(products)
     .innerJoin(users, eq(products.developerId, users.id))
     .where(eq(products.moderationStatus, "pending"))
-    .orderBy(desc(products.createdAt))
-    .limit(20);
+    .orderBy(desc(products.createdAt));
 
   return (
     <div className="space-y-8">
-      {/* Reports Queue */}
+      {/* Pending Reports Section */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-amber-400" />
-            <span>待处理违规举报队列 ({pendingReportsList.length})</span>
-          </h2>
-        </div>
+        <h2 className="text-base font-bold text-white flex items-center gap-2">
+          <Flag className="h-4 w-4 text-red-400" />
+          <span>User Reports Queue ({pendingReports.length})</span>
+        </h2>
 
-        {pendingReportsList.length === 0 ? (
-          <div className="p-8 text-center rounded-2xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
-            暂无未处理举报。
+        {pendingReports.length === 0 ? (
+          <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
+            No pending user reports. The community is clean!
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/50">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
                 <tr>
-                  <th className="p-3.5">举报人</th>
-                  <th className="p-3.5">违规对象</th>
-                  <th className="p-3.5">举报理由</th>
-                  <th className="p-3.5">时间</th>
-                  <th className="p-3.5 text-right">审核操作</th>
+                  <th className="p-4">Target Type</th>
+                  <th className="p-4">Reason</th>
+                  <th className="p-4">Reported By</th>
+                  <th className="p-4">Timestamp</th>
+                  <th className="p-4 text-right">Review Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono">
-                {pendingReportsList.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-800/40">
-                    <td className="p-3.5 font-sans font-semibold text-slate-200">{r.reporter.username}</td>
-                    <td className="p-3.5 text-purple-300">{r.targetType} #{r.targetId}</td>
-                    <td className="p-3.5 text-amber-400 font-sans">{r.reason}</td>
-                    <td className="p-3.5 font-sans text-slate-500">{new Date(r.createdAt).toLocaleString("zh-CN")}</td>
-                    <td className="p-3.5 text-right font-sans">
-                      <ModRowActions type="resolve_report" targetId={r.id} />
+              <tbody className="divide-y divide-slate-800/60">
+                {pendingReports.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-900/80 transition-colors">
+                    <td className="p-4 font-mono font-bold text-slate-200 uppercase">{r.targetType}</td>
+                    <td className="p-4 text-amber-400 font-medium">{r.reason}</td>
+                    <td className="p-4 text-slate-300">{r.reporter.username}</td>
+                    <td className="p-4 text-slate-500">{new Date(r.createdAt).toLocaleString("en-US")}</td>
+                    <td className="p-4 text-right">
+                      <ModerationRowActions reportId={r.id} />
                     </td>
                   </tr>
                 ))}
@@ -83,41 +81,49 @@ export default async function AdminModerationPage() {
         )}
       </div>
 
-      {/* Product Review Queue */}
+      {/* Pending Product Reviews */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <ShoppingBag className="h-5 w-5 text-emerald-400" />
-            <span>待上架商品审核队列 ({pendingProducts.length})</span>
-          </h2>
-        </div>
+        <h2 className="text-base font-bold text-white flex items-center gap-2">
+          <ShoppingBag className="h-4 w-4 text-emerald-400" />
+          <span>Product Submission Queue ({pendingProducts.length})</span>
+        </h2>
 
         {pendingProducts.length === 0 ? (
-          <div className="p-8 text-center rounded-2xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
-            暂无待审核商品。
+          <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
+            No marketplace assets awaiting approval.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/50">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
                 <tr>
-                  <th className="p-3.5">商品名称</th>
-                  <th className="p-3.5">创作者</th>
-                  <th className="p-3.5">价格</th>
-                  <th className="p-3.5">外部 Release 交付链接</th>
-                  <th className="p-3.5 text-right">审核操作</th>
+                  <th className="p-4">Product Title</th>
+                  <th className="p-4">Developer</th>
+                  <th className="p-4">Category</th>
+                  <th className="p-4">Price</th>
+                  <th className="p-4">GitHub Release</th>
+                  <th className="p-4 text-right">Review Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {pendingProducts.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-800/40">
-                    <td className="p-3.5 font-bold text-white">{p.title}</td>
-                    <td className="p-3.5 text-slate-300">{p.developer.username}</td>
-                    <td className="p-3.5 text-amber-400 font-bold">{p.tokenPrice} Credits</td>
-                    <td className="p-3.5 text-blue-400 font-mono text-[11px] truncate max-w-xs">{p.githubReleaseUrl}</td>
-                    <td className="p-3.5 text-right space-x-2">
-                      <ModRowActions type="approve_product" targetId={p.id} />
-                      <ModRowActions type="reject_product" targetId={p.id} />
+                  <tr key={p.id} className="hover:bg-slate-900/80 transition-colors">
+                    <td className="p-4 font-bold text-slate-200">{p.title}</td>
+                    <td className="p-4 text-slate-300">{p.developer.username}</td>
+                    <td className="p-4 text-slate-400">{p.category}</td>
+                    <td className="p-4 font-bold text-amber-400">{p.tokenPrice} Credits</td>
+                    <td className="p-4">
+                      <a
+                        href={p.githubReleaseUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline truncate max-w-xs block"
+                      >
+                        {p.githubReleaseUrl}
+                      </a>
+                    </td>
+                    <td className="p-4 text-right">
+                      <ModerationRowActions productId={p.id} />
                     </td>
                   </tr>
                 ))}

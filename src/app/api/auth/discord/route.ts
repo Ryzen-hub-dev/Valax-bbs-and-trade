@@ -1,9 +1,13 @@
 import { generateState } from "arctic";
-import { discord } from "@/lib/auth";
+import { getDiscordClient } from "@/lib/auth";
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(): Promise<NextResponse> {
+export const dynamic = "force-dynamic";
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const origin = request.nextUrl.origin;
+  const discord = getDiscordClient(origin);
   const state = generateState();
   const url = discord.createAuthorizationURL(state, ["identify", "email"]);
 

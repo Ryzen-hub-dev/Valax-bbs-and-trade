@@ -1,93 +1,88 @@
-﻿import { client } from "./index";
-import * as dotenv from "dotenv";
-dotenv.config();
+import { db } from "./index";
+import { forumBoards, systemSettings } from "./schema";
+import { nanoid } from "nanoid";
 
-async function seed() {
-  console.log("[+] Seeding initial forum boards and system settings...");
+async function runSeed() {
+  console.log("Seeding Valax Scrub initial English boards and settings...");
 
   const boards = [
     {
-      id: "board-announcements",
+      id: "board_announcements",
+      name: "Official Announcements",
       slug: "announcements",
-      name: "Announcements & Updates",
-      description: "Official Valax Scrub platform updates, release notes, and community notices.",
-      icon: "Megaphone",
-      sort_order: 1,
-      is_locked: 0,
-      min_reputation_to_post: 100
+      description: "Official platform updates, major releases, and ecosystem news.",
+      sortOrder: 1,
+      minReputationToPost: 50,
+      isReadOnly: false,
     },
     {
-      id: "board-dev-scripts",
-      slug: "scripts-and-dev",
+      id: "board_scripts_dev",
       name: "Scripts & Development",
-      description: "Discuss script development, architectures, optimization techniques, and code snippets.",
-      icon: "Code2",
-      sort_order: 2,
-      is_locked: 0,
-      min_reputation_to_post: 0
+      slug: "scripts-and-dev",
+      description: "Technical discussions, script architecture, API integration, and troubleshooting.",
+      sortOrder: 2,
+      minReputationToPost: 0,
+      isReadOnly: false,
     },
     {
-      id: "board-market-discussion",
+      id: "board_market_disc",
+      name: "Marketplace Discussion",
       slug: "market-discussion",
-      name: "Marketplace & Trade",
-      description: "Product reviews, digital asset showcases, buyer feedback, and merchant discussions.",
-      icon: "ShoppingBag",
-      sort_order: 3,
-      is_locked: 0,
-      min_reputation_to_post: 0
+      description: "Asset requests, creator showcases, license reviews, and tool feedback.",
+      sortOrder: 3,
+      minReputationToPost: 0,
+      isReadOnly: false,
     },
     {
-      id: "board-support",
+      id: "board_support",
+      name: "Support & Troubleshooting",
       slug: "support",
-      name: "Help & Technical Support",
-      description: "Community Q&A, troubleshooting guides, setup assistance, and mark-as-solved threads.",
-      icon: "HelpCircle",
-      sort_order: 4,
-      is_locked: 0,
-      min_reputation_to_post: 0
+      description: "Community support, environment configuration, and bug reporting.",
+      sortOrder: 4,
+      minReputationToPost: 0,
+      isReadOnly: false,
     },
     {
-      id: "board-bounties",
+      id: "board_bounties",
+      name: "Bounties & Rewards",
       slug: "bounties-and-rewards",
-      name: "Bug Bounties & Rewards",
-      description: "Contribute tutorials, report verified vulnerabilities, and earn Valax Utility Credits.",
-      icon: "Award",
-      sort_order: 5,
-      is_locked: 0,
-      min_reputation_to_post: 0
-    }
+      description: "Community-funded script bounties, feature requests, and developer rewards.",
+      sortOrder: 5,
+      minReputationToPost: 10,
+      isReadOnly: false,
+    },
   ];
 
   for (const b of boards) {
-    await client.execute({
-      sql: `INSERT INTO forum_boards (id, slug, name, description, icon, sort_order, is_locked, min_reputation_to_post)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(slug) DO UPDATE SET name=excluded.name, description=excluded.description, icon=excluded.icon, sort_order=excluded.sort_order;`,
-      args: [b.id, b.slug, b.name, b.description, b.icon, b.sort_order, b.is_locked, b.min_reputation_to_post]
-    });
+    try {
+      await db.insert(forumBoards).values(b).onConflictDoNothing();
+      console.log(`Board seeded: ${b.name}`);
+    } catch (e) {
+      console.log(`Board insert skipped: ${b.name}`);
+    }
   }
 
   const defaultSettings = [
-    { key: "SITE_NAME", value: "Valax Scrub BBS and Trade" },
-    { key: "SITE_DESCRIPTION", value: "Decentralized Digital Asset Marketplace & Developer Community" },
-    { key: "PAYPAL_ENABLED", value: "true" },
-    { key: "REGISTRATION_OPEN", value: "true" },
-    { key: "MAINTENANCE_MODE", value: "false" },
-    { key: "MARKETPLACE_FEE_PERCENT", value: "5" },
-    { key: "TOKEN_NAME", value: "Valax Utility Credit" }
+    { key: "marketplace_platform_fee_percent", value: "5", description: "Marketplace commission rate (%)" },
+    { key: "marketplace_auto_approve", value: "true", description: "Auto-approve GitHub release assets" },
+    { key: "new_user_starting_credits", value: "100", description: "Starting Utility Credits for new users" },
+    { key: "thread_create_rate_limit_per_minute", value: "5", description: "Max threads created per minute" },
   ];
 
   for (const s of defaultSettings) {
-    await client.execute({
-      sql: `INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING;`,
-      args: [s.key, s.value]
-    });
+    try {
+      await db.insert(systemSettings).values(s).onConflictDoNothing();
+      console.log(`Setting seeded: ${s.key}`);
+    } catch (e) {
+      console.log(`Setting insert skipped: ${s.key}`);
+    }
   }
 
-  console.log("[+] Seed completed successfully!");
+  console.log("English seed completed successfully.");
+  process.exit(0);
 }
 
-seed().catch(err => {
-  console.error("[-] Seed error:", err);
+runSeed().catch((err) => {
+  console.error("Seed error:", err);
   process.exit(1);
 });

@@ -2,26 +2,26 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Coins, ShieldAlert, AlertCircle, X } from "lucide-react";
+import { AlertTriangle, PlusCircle, X } from "lucide-react";
 
 export function LedgerAdjustModal() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [targetUserId, setTargetUserId] = useState("");
-  const [amount, setAmount] = useState<number>(100);
+  const [amount, setAmount] = useState<number>(0);
   const [reason, setReason] = useState("");
-  const [confirmationCode, setConfirmationCode] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmCode, setConfirmCode] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const handleAdjust = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (confirmationCode !== "CONFIRM_VALAX_ADJUST") {
-      setErrorMsg("请输入正确的双重确认代码: CONFIRM_VALAX_ADJUST");
+    if (confirmCode !== "CONFIRM_VALAX_ADJUST") {
+      setErrorMsg("Confirmation code mismatch. You must type CONFIRM_VALAX_ADJUST");
       return;
     }
 
-    setIsSubmitting(true);
+    setIsLoading(true);
     setErrorMsg("");
 
     try {
@@ -32,19 +32,19 @@ export function LedgerAdjustModal() {
           targetUserId,
           amount: Number(amount),
           reason,
-          confirmationCode,
+          confirmCode,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "调整失败");
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Adjustment failed");
 
       setIsOpen(false);
       router.refresh();
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
@@ -52,97 +52,107 @@ export function LedgerAdjustModal() {
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md transition-colors"
+        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md transition-all"
       >
-        <Coins className="h-4 w-4" />
-        <span>手动增减用户积分 (双重确认)</span>
+        <PlusCircle className="h-4 w-4" />
+        Manual Credit Adjustment
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <form onSubmit={handleAdjust} className="w-full max-w-md p-6 sm:p-8 rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-base text-white">积分手动调整与流水记录</h3>
-              <button type="button" onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4 relative">
+            <button
+              onClick={() => setIsOpen(false)}
+              className="absolute right-5 top-5 text-slate-400 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                <span>Manual Ledger Credit Adjustment</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Directly writes a double-entry mutation and audit record to the target wallet.
+              </p>
             </div>
 
             {errorMsg && (
-              <div className="p-3 rounded-lg bg-red-950/40 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{errorMsg}</span>
+              <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs">
+                {errorMsg}
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">目标用户 ID (usr_xxx)</label>
-              <input
-                type="text"
-                required
-                value={targetUserId}
-                onChange={(e) => setTargetUserId(e.target.value)}
-                placeholder="usr_..."
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">变动数量 (正数为增加，负数为扣除)</label>
-              <input
-                type="number"
-                required
-                value={amount}
-                onChange={(e) => setAmount(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">审计调整原因</label>
-              <input
-                type="text"
-                required
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="例如: 社区悬赏活动奖励 / 异常回滚"
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none"
-              />
-            </div>
-
-            <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-800/40 space-y-2 text-xs text-purple-300">
-              <div className="flex items-center gap-1.5 font-bold">
-                <ShieldAlert className="h-4 w-4 text-purple-400" />
-                <span>敏感操作二次确认保护</span>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Target User ID</label>
+                <input
+                  type="text"
+                  required
+                  value={targetUserId}
+                  onChange={(e) => setTargetUserId(e.target.value)}
+                  placeholder="usr_..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono focus:outline-none"
+                />
               </div>
-              <p className="text-[11px] text-purple-300/80">请输入 <strong>CONFIRM_VALAX_ADJUST</strong> 确认提交：</p>
-              <input
-                type="text"
-                required
-                value={confirmationCode}
-                onChange={(e) => setConfirmationCode(e.target.value)}
-                placeholder="CONFIRM_VALAX_ADJUST"
-                className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-purple-700/60 text-white text-xs font-mono focus:outline-none"
-              />
-            </div>
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white"
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-bold shadow-md"
-              >
-                {isSubmitting ? "写入账本中..." : "确认执行调整"}
-              </button>
-            </div>
-          </form>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Credit Amount (Positive to add, Negative to deduct)</label>
+                <input
+                  type="number"
+                  required
+                  value={amount}
+                  onChange={(e) => setAmount(Number(e.target.value))}
+                  placeholder="100 or -50"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Reason / Reference Note</label>
+                <input
+                  type="text"
+                  required
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="e.g. Bounty reward, compensation..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-400 mb-1">
+                  Type Confirmation Code: <code className="text-white">CONFIRM_VALAX_ADJUST</code>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={confirmCode}
+                  onChange={(e) => setConfirmCode(e.target.value)}
+                  placeholder="CONFIRM_VALAX_ADJUST"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/50 text-slate-200 text-xs font-mono focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs shadow-md"
+                >
+                  {isLoading ? "Executing..." : "Execute Adjustment"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </>

@@ -5,42 +5,42 @@ import { desc, eq } from "drizzle-orm";
 import { MessageSquare, PlusCircle, Pin, CheckCircle2, ThumbsUp, Flame, Clock } from "lucide-react";
 import { FadeIn, StaggerList } from "@/components/animations/gsap-wrapper";
 
+export const dynamic = "force-dynamic";
+
 export default async function BBSIndexPage({
   searchParams,
 }: {
   searchParams: { sort?: string };
 }) {
-  const boards = await db.select().from(forumBoards).orderBy(forumBoards.sortOrder);
+  let boards: any[] = [];
+  let threads: any[] = [];
   const sort = searchParams.sort || "latest";
 
-  const threads = await db
-    .select({
-      id: forumThreads.id,
-      title: forumThreads.title,
-      slug: forumThreads.slug,
-      tags: forumThreads.tags,
-      isPinned: forumThreads.isPinned,
-      isResolved: forumThreads.isResolved,
-      likesCount: forumThreads.likesCount,
-      repliesCount: forumThreads.repliesCount,
-      createdAt: forumThreads.createdAt,
-      author: {
-        username: users.username,
-      },
-      board: {
-        slug: forumBoards.slug,
-        name: forumBoards.name,
-      },
-    })
-    .from(forumThreads)
-    .innerJoin(users, eq(forumThreads.authorId, users.id))
-    .innerJoin(forumBoards, eq(forumThreads.boardId, forumBoards.id))
-    .where(eq(forumThreads.status, "published"))
-    .orderBy(
-      desc(forumThreads.isPinned),
-      sort === "popular" ? desc(forumThreads.likesCount) : desc(forumThreads.lastReplyAt)
-    )
-    .limit(25);
+  try {
+    boards = await db.select().from(forumBoards).orderBy(forumBoards.sortOrder);
+    threads = await db
+      .select({
+        id: forumThreads.id,
+        title: forumThreads.title,
+        slug: forumThreads.slug,
+        tags: forumThreads.tags,
+        isPinned: forumThreads.isPinned,
+        isResolved: forumThreads.isResolved,
+        likesCount: forumThreads.likesCount,
+        repliesCount: forumThreads.repliesCount,
+        createdAt: forumThreads.createdAt,
+        author: { username: users.username },
+        board: { slug: forumBoards.slug, name: forumBoards.name },
+      })
+      .from(forumThreads)
+      .innerJoin(users, eq(forumThreads.authorId, users.id))
+      .innerJoin(forumBoards, eq(forumThreads.boardId, forumBoards.id))
+      .where(eq(forumThreads.status, "published"))
+      .orderBy(desc(forumThreads.isPinned), sort === "popular" ? desc(forumThreads.likesCount) : desc(forumThreads.lastReplyAt))
+      .limit(25);
+  } catch (err) {
+    console.error("BBS fetch error:", err);
+  }
 
   return (
     <div className="space-y-8">
@@ -48,10 +48,10 @@ export default async function BBSIndexPage({
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-2.5">
             <MessageSquare className="h-7 w-7 text-blue-400" />
-            Valax Scrub BBS 社区
+            Valax Scrub BBS Community
           </h1>
           <p className="mt-1.5 text-sm text-slate-400">
-            技术交流、脚本架构讨论、技术问答与社区悬赏
+            Technical discussions, architecture proposals, development Q&A, and community bounties
           </p>
         </div>
         <Link
@@ -59,12 +59,12 @@ export default async function BBSIndexPage({
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-lg shadow-blue-600/25 transition-all shrink-0"
         >
           <PlusCircle className="h-4 w-4" />
-          发布新帖子
+          Create New Thread
         </Link>
       </FadeIn>
 
       <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4">版块分区</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4">Forum Boards</h2>
         <StaggerList className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {boards.map((b) => (
             <Link
@@ -81,10 +81,10 @@ export default async function BBSIndexPage({
                 </p>
               </div>
               <div className="mt-4 flex items-center justify-between text-[11px] text-slate-500 pt-3 border-t border-slate-800/60">
-                <span>进入版块 &rarr;</span>
+                <span>Enter Board &rarr;</span>
                 {b.minReputationToPost > 0 && (
                   <span className="px-2 py-0.5 rounded bg-amber-950/40 text-amber-400 border border-amber-800/40">
-                    声望 ≥ {b.minReputationToPost}
+                    Reputation ≥ {b.minReputationToPost}
                   </span>
                 )}
               </div>
@@ -96,8 +96,8 @@ export default async function BBSIndexPage({
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <span>社区近期动态</span>
-            <span className="text-xs font-normal text-slate-400">({threads.length} 篇)</span>
+            <span>Recent Activity</span>
+            <span className="text-xs font-normal text-slate-400">({threads.length} threads)</span>
           </h2>
           <div className="flex items-center gap-2">
             <Link
@@ -107,7 +107,7 @@ export default async function BBSIndexPage({
               }`}
             >
               <Clock className="h-3.5 w-3.5" />
-              最新回复
+              Latest
             </Link>
             <Link
               href="/bbs?sort=popular"
@@ -116,14 +116,14 @@ export default async function BBSIndexPage({
               }`}
             >
               <Flame className="h-3.5 w-3.5 text-amber-400" />
-              热门高赞
+              Popular
             </Link>
           </div>
         </div>
 
         {threads.length === 0 ? (
           <div className="p-12 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400">
-            暂无相关帖子，来发布第一篇讨论吧！
+            No threads found. Be the first to start a conversation!
           </div>
         ) : (
           <div className="space-y-3">
@@ -144,12 +144,12 @@ export default async function BBSIndexPage({
                       </Link>
                       {t.isPinned && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[11px] font-semibold border border-amber-500/30">
-                          <Pin className="h-3 w-3" /> 置顶
+                          <Pin className="h-3 w-3" /> Pinned
                         </span>
                       )}
                       {t.isResolved && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[11px] font-semibold border border-emerald-500/30">
-                          <CheckCircle2 className="h-3 w-3" /> 已解决
+                          <CheckCircle2 className="h-3 w-3" /> Solved
                         </span>
                       )}
                       {tagsList.map((tag) => (
@@ -165,9 +165,9 @@ export default async function BBSIndexPage({
                       {t.title}
                     </Link>
                     <div className="text-xs text-slate-500">
-                      <span>作者: {t.author.username}</span>
+                      <span>By {t.author.username}</span>
                       <span className="mx-2">•</span>
-                      <span>{new Date(t.createdAt).toLocaleDateString("zh-CN")}</span>
+                      <span>{new Date(t.createdAt).toLocaleDateString("en-US")}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-slate-400 shrink-0 sm:border-l sm:border-slate-800/80 sm:pl-6">

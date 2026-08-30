@@ -2,8 +2,10 @@ import Link from "next/link";
 import { db } from "@/db";
 import { products, users } from "@/db/schema";
 import { desc, eq, and } from "drizzle-orm";
-import { ShoppingBag, PlusCircle, Coins, Github, ShieldCheck, Tag, ExternalLink } from "lucide-react";
+import { ShoppingBag, PlusCircle, Coins, Github, ShieldCheck, Tag } from "lucide-react";
 import { FadeIn, StaggerList } from "@/components/animations/gsap-wrapper";
+
+export const dynamic = "force-dynamic";
 
 export default async function MarketplacePage({
   searchParams,
@@ -11,36 +13,41 @@ export default async function MarketplacePage({
   searchParams: { category?: string; sort?: string };
 }) {
   const category = searchParams.category;
+  let items: any[] = [];
 
-  const items = await db
-    .select({
-      id: products.id,
-      title: products.title,
-      slug: products.slug,
-      shortDescription: products.shortDescription,
-      category: products.category,
-      tokenPrice: products.tokenPrice,
-      version: products.version,
-      salesCount: products.salesCount,
-      ratingAverage: products.ratingAverage,
-      previewImageUrl: products.previewImageUrl,
-      createdAt: products.createdAt,
-      developer: {
-        username: users.username,
-        avatarUrl: users.avatarUrl,
-      },
-    })
-    .from(products)
-    .innerJoin(users, eq(products.developerId, users.id))
-    .where(
-      and(
-        eq(products.status, "active"),
-        eq(products.moderationStatus, "approved"),
-        category ? eq(products.category, category) : undefined
+  try {
+    items = await db
+      .select({
+        id: products.id,
+        title: products.title,
+        slug: products.slug,
+        shortDescription: products.shortDescription,
+        category: products.category,
+        tokenPrice: products.tokenPrice,
+        version: products.version,
+        salesCount: products.salesCount,
+        ratingAverage: products.ratingAverage,
+        previewImageUrl: products.previewImageUrl,
+        createdAt: products.createdAt,
+        developer: {
+          username: users.username,
+          avatarUrl: users.avatarUrl,
+        },
+      })
+      .from(products)
+      .innerJoin(users, eq(products.developerId, users.id))
+      .where(
+        and(
+          eq(products.status, "active"),
+          eq(products.moderationStatus, "approved"),
+          category ? eq(products.category, category) : undefined
+        )
       )
-    )
-    .orderBy(desc(products.createdAt))
-    .limit(30);
+      .orderBy(desc(products.createdAt))
+      .limit(30);
+  } catch (err) {
+    console.error("Marketplace fetch error:", err);
+  }
 
   const categories = ["All", "Scripts", "Templates", "Tools", "Services"];
 
@@ -54,10 +61,10 @@ export default async function MarketplacePage({
             <span>Verified GitHub Releases Only</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Valax Scrub 数字商品与资产市场
+            Valax Scrub Digital Assets & Script Market
           </h1>
           <p className="mt-2 text-sm text-slate-400 max-w-2xl leading-relaxed">
-            购买高质量脚本、开发模板与社区定制服务。仅支持经审核的 GitHub Release 外部安全交付，采用 Valax Utility Credits 结算。
+            Acquire developer tools, automation scripts, and custom services. Secure delivery exclusively through verified GitHub Releases with Valax Utility Credits.
           </p>
         </div>
         <Link
@@ -65,7 +72,7 @@ export default async function MarketplacePage({
           className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold shadow-lg shadow-emerald-600/25 transition-all shrink-0"
         >
           <PlusCircle className="h-4 w-4" />
-          发布数字商品
+          Publish Digital Asset
         </Link>
       </FadeIn>
 
@@ -93,7 +100,7 @@ export default async function MarketplacePage({
       {/* Products Grid */}
       {items.length === 0 ? (
         <div className="p-16 text-center rounded-2xl border border-slate-800 bg-slate-900/30 text-slate-400">
-          该分类下暂无已审核上架的数字资产。
+          No approved items in this category yet.
         </div>
       ) : (
         <StaggerList className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -127,14 +134,14 @@ export default async function MarketplacePage({
                     <Coins className="h-4 w-4" />
                     <span>{item.tokenPrice}</span>
                   </div>
-                  <span className="text-[11px] text-slate-500">已售 {item.salesCount}</span>
+                  <span className="text-[11px] text-slate-500">{item.salesCount} sold</span>
                 </div>
 
                 <Link
                   href={`/market/${item.slug}`}
                   className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
                 >
-                  查看详情 &rarr;
+                  View Details &rarr;
                 </Link>
               </div>
             </div>

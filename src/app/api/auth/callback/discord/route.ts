@@ -1,11 +1,13 @@
 import { OAuth2Tokens } from "arctic";
-import { discord, createSession, setSessionCookie } from "@/lib/auth";
+import { getDiscordClient, createSession, setSessionCookie } from "@/lib/auth";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
+
+export const dynamic = "force-dynamic";
 
 interface DiscordUserResponse {
   id: string;
@@ -27,6 +29,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    const origin = request.nextUrl.origin;
+    const discord = getDiscordClient(origin);
     const tokens: OAuth2Tokens = await discord.validateAuthorizationCode(code);
     const accessToken = tokens.accessToken();
 
@@ -37,7 +41,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     if (!userResponse.ok) {
-      return new NextResponse("Failed to fetch user from Discord", { status: 500 });
+      return new NextResponse("Failed to fetch user profile from Discord", { status: 500 });
     }
 
     const discordUser: DiscordUserResponse = await userResponse.json();
@@ -62,14 +66,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         discriminator: discordUser.discriminator,
         avatarUrl,
         role: "user",
-        reputationScore: 10, // Initial bonus
+        reputationScore: 10,
       });
     } else {
       userId = existingUser.id;
       if (existingUser.isBanned) {
-        return new NextResponse("This account has been banned.", { status: 403 });
+        return new NextResponse("Your account has been suspended by an administrator.", { status: 403 });
       }
-      // Update avatar and username
       await db
         .update(users)
         .set({

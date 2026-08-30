@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { SafeMarkdown } from "@/components/markdown/safe-markdown";
-import { AlertCircle, Eye, Send, Github, ShieldAlert } from "lucide-react";
+import { AlertCircle, Eye, Send, Github } from "lucide-react";
 
 export default function PublishProductPage() {
   const router = useRouter();
@@ -27,7 +27,7 @@ export default function PublishProductPage() {
     setErrorMsg("");
 
     if (!githubReleaseUrl.includes("github.com") || !githubReleaseUrl.includes("/releases")) {
-      setErrorMsg("必须提供符合规范的 GitHub Release 外部链接 (例如: https://github.com/owner/repo/releases/tag/v1.0.0)");
+      setErrorMsg("You must provide a valid external GitHub Release URL (e.g., https://github.com/owner/repo/releases/tag/v1.0.0)");
       return;
     }
 
@@ -53,7 +53,7 @@ export default function PublishProductPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "发布失败");
+        throw new Error(data.error || "Failed to submit product");
       }
 
       router.push(`/market/${data.slug}`);
@@ -66,9 +66,9 @@ export default function PublishProductPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">上架数字商品 / 开发脚本</h1>
+        <h1 className="text-2xl font-bold text-white">Publish Digital Asset / Developer Script</h1>
         <p className="mt-1 text-xs text-slate-400">
-          遵守零文件上传政策，所有商品二进制交付必须指向通过验证的外部 GitHub Release。
+          In compliance with our zero binary upload policy, all deliverables must link to a verified external GitHub Release.
         </p>
       </div>
 
@@ -82,47 +82,47 @@ export default function PublishProductPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">商品名称</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Asset Title</label>
             <input
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如: Valax Auto Cleaner Tool"
+              placeholder="e.g. Valax Auto Tooling Script"
               className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-900 text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">分类</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Category</label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className="w-full px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-900 text-slate-200 text-sm focus:outline-none focus:border-emerald-500"
             >
-              <option value="Scripts">Scripts (自动化脚本)</option>
-              <option value="Templates">Templates (主题与模板)</option>
-              <option value="Tools">Tools (独立工具箱)</option>
-              <option value="Services">Services (定制与社区服务)</option>
+              <option value="Scripts">Scripts (Automation & Logic)</option>
+              <option value="Templates">Templates (Themes & Blueprints)</option>
+              <option value="Tools">Tools (Standalone Utilities)</option>
+              <option value="Services">Services (Custom Development)</option>
             </select>
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1.5">一句话简要描述</label>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">Short Summary (10-200 characters)</label>
           <input
             type="text"
             required
             value={shortDescription}
             onChange={(e) => setShortDescription(e.target.value)}
-            placeholder="展示在列表卡片上的简短介绍 (10-200字)..."
+            placeholder="Brief overview displayed on marketplace cards..."
             className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-900 text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
           />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Token 售价 (Credits)</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Price (Credits)</label>
             <input
               type="number"
               min="0"
@@ -134,7 +134,7 @@ export default function PublishProductPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">发布版本</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Version</label>
             <input
               type="text"
               required
@@ -146,7 +146,7 @@ export default function PublishProductPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">兼容性</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Compatibility</label>
             <input
               type="text"
               required
@@ -158,15 +158,14 @@ export default function PublishProductPage() {
           </div>
         </div>
 
-        {/* GitHub External Links */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/40 space-y-4">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
             <Github className="h-4 w-4 text-emerald-400" />
-            <span>外部 GitHub 交付配置 (必须校验)</span>
+            <span>GitHub Delivery Configuration (Strictly Verified)</span>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">GitHub Release 外部下载链接 *</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">GitHub Release Download URL *</label>
             <input
               type="url"
               required
@@ -179,7 +178,7 @@ export default function PublishProductPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">GitHub 源码/仓库链接 (选填)</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Source Repository URL (Optional)</label>
               <input
                 type="url"
                 value={githubRepositoryUrl}
@@ -189,7 +188,7 @@ export default function PublishProductPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">文档链接 (选填)</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Documentation URL (Optional)</label>
               <input
                 type="url"
                 value={documentationUrl}
@@ -201,7 +200,6 @@ export default function PublishProductPage() {
           </div>
         </div>
 
-        {/* Detailed Markdown description */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-950/60">
             <div className="flex items-center gap-2">
@@ -212,7 +210,7 @@ export default function PublishProductPage() {
                   activeTab === "write" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"
                 }`}
               >
-                商品详情说明 (Markdown)
+                Description (Markdown)
               </button>
               <button
                 type="button"
@@ -222,7 +220,7 @@ export default function PublishProductPage() {
                 }`}
               >
                 <Eye className="h-3.5 w-3.5" />
-                实时预览
+                Live Preview
               </button>
             </div>
           </div>
@@ -233,7 +231,7 @@ export default function PublishProductPage() {
               rows={10}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="详细描述商品功能、安装指南、使用案例..."
+              placeholder="Describe feature breakdown, installation guidelines, prerequisites..."
               className="w-full p-4 bg-transparent text-slate-100 text-sm font-mono focus:outline-none resize-y leading-relaxed"
             />
           ) : (
@@ -241,7 +239,7 @@ export default function PublishProductPage() {
               {description.trim() ? (
                 <SafeMarkdown content={description} />
               ) : (
-                <div className="text-center py-8 text-slate-500 text-xs">暂无内容可供预览</div>
+                <div className="text-center py-8 text-slate-500 text-xs">Nothing to preview yet</div>
               )}
             </div>
           )}
@@ -254,7 +252,7 @@ export default function PublishProductPage() {
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold shadow-lg shadow-emerald-600/25 transition-all"
           >
             <Send className="h-4 w-4" />
-            {isSubmitting ? "提交中..." : "提交上架审核"}
+            {isSubmitting ? "Submitting..." : "Submit for Moderation"}
           </button>
         </div>
       </form>

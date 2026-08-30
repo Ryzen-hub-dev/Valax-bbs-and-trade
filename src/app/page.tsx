@@ -58,15 +58,15 @@ export default async function RootPortalPage() {
         <div className="space-y-4 max-w-3xl">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold">
             <Sparkles className="h-3.5 w-3.5" />
-            <span>Valax Scrub BBS & Digital Marketplace 子站</span>
+            <span>Valax Scrub BBS & Digital Marketplace Subplatform</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight">
-            极简、安全、专为脚本与开发者打造的 <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">BBS 社区 & 数字交易市场</span>
+            Lightweight, Secure & Built for Developers: <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">BBS Community & Digital Trade</span>
           </h1>
 
           <p className="text-sm sm:text-base text-slate-400 leading-relaxed">
-            零文件上传、纯外部 GitHub 交付安全规范，结合不可篡改的 Valax Utility Credit 双重账本。加入讨论、购买工具或展示你的代码成果。
+            Zero binary uploads, verified GitHub Release external delivery, and an immutable double-entry Valax Utility Credit ledger. Join discussions, acquire tools, and showcase your scripts.
           </p>
         </div>
 
@@ -76,14 +76,14 @@ export default async function RootPortalPage() {
             className="flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-600/30 transition-all transform active:scale-95"
           >
             <MessageSquare className="h-4 w-4" />
-            浏览 BBS 社区
+            Explore BBS Community
           </Link>
           <Link
             href="/market"
             className="flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold border border-slate-700 transition-all"
           >
             <ShoppingBag className="h-4 w-4 text-emerald-400" />
-            探索数字商品市场
+            Browse Marketplace
           </Link>
         </div>
       </FadeIn>
@@ -92,8 +92,8 @@ export default async function RootPortalPage() {
         <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-3">
           <AlertCircle className="h-5 w-5 shrink-0 text-amber-400" />
           <div>
-            <p className="font-semibold">提示：尚未在 Vercel 配置数据库环境变量</p>
-            <p className="text-amber-300/80 mt-0.5">请前往 Vercel 控制台 Project Settings &gt; Environment Variables 添加 TURSO_DATABASE_URL 和 TURSO_AUTH_TOKEN。</p>
+            <p className="font-semibold">Notice: Database environment variables not configured in Vercel</p>
+            <p className="text-amber-300/80 mt-0.5">Please add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your Vercel Project Settings &gt; Environment Variables.</p>
           </div>
         </div>
       )}
@@ -104,9 +104,9 @@ export default async function RootPortalPage() {
           <div className="h-10 w-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
             <Code2 className="h-5 w-5" />
           </div>
-          <h3 className="font-bold text-base text-white">安全外部交付</h3>
+          <h3 className="font-bold text-base text-white">Verified External Delivery</h3>
           <p className="text-xs text-slate-400 leading-relaxed">
-            网站不存储任何用户二进制文件，完全由经审查的 GitHub Release 提供下载通道，保障环境纯净。
+            The platform never hosts user executable binaries. All assets link directly to verified external GitHub Releases.
           </p>
         </div>
 
@@ -114,9 +114,9 @@ export default async function RootPortalPage() {
           <div className="h-10 w-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
             <Coins className="h-5 w-5" />
           </div>
-          <h3 className="font-bold text-base text-white">Utility Credit 双账本</h3>
+          <h3 className="font-bold text-base text-white">Utility Credit Dual Ledger</h3>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Turso LibSQL 强一致性账户与不可篡改流水审计日志，确保每笔积分流向皆可溯源。
+            Turso LibSQL strong consistency with immutable transaction journal logs ensuring full traceability.
           </p>
         </div>
 
@@ -124,9 +124,9 @@ export default async function RootPortalPage() {
           <div className="h-10 w-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400">
             <Award className="h-5 w-5" />
           </div>
-          <h3 className="font-bold text-base text-white">Discord 身份认证</h3>
+          <h3 className="font-bold text-base text-white">Discord Authentication</h3>
           <p className="text-xs text-slate-400 leading-relaxed">
-            全站使用 Discord OAuth 授权与 HttpOnly 安全会话，免除繁琐密码管理，支持即时会话吊销。
+            Fast passwordless login via Discord OAuth with HttpOnly security and instant remote session revocation.
           </p>
         </div>
       </StaggerList>
@@ -138,17 +138,17 @@ export default async function RootPortalPage() {
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <Flame className="h-4 w-4 text-amber-400" />
-              <span>热门技术讨论</span>
+              <span>Trending Technical Discussions</span>
             </h2>
             <Link href="/bbs" className="text-xs text-blue-400 hover:text-blue-300 font-medium">
-              查看全部 &rarr;
+              View All &rarr;
             </Link>
           </div>
 
           <div className="space-y-3">
             {hotThreads.length === 0 ? (
               <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
-                暂无帖子记录，点击上方按钮发布第一篇讨论！
+                No discussions yet. Be the first to start a conversation!
               </div>
             ) : (
               hotThreads.map((t) => (
@@ -161,10 +161,10 @@ export default async function RootPortalPage() {
                     {t.title}
                   </h3>
                   <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                    <span>作者: {t.author?.username || "社区成员"}</span>
+                    <span>By {t.author?.username || "Community Member"}</span>
                     <div className="flex items-center gap-3">
-                      <span>{t.likesCount} 点赞</span>
-                      <span>{t.repliesCount} 回复</span>
+                      <span>{t.likesCount} Likes</span>
+                      <span>{t.repliesCount} Replies</span>
                     </div>
                   </div>
                 </Link>
@@ -178,17 +178,17 @@ export default async function RootPortalPage() {
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <ShoppingBag className="h-4 w-4 text-emerald-400" />
-              <span>精选数字商品 & 脚本</span>
+              <span>Featured Developer Assets</span>
             </h2>
             <Link href="/market" className="text-xs text-emerald-400 hover:text-emerald-300 font-medium">
-              进入市场 &rarr;
+              Visit Market &rarr;
             </Link>
           </div>
 
           <div className="space-y-3">
             {featuredProducts.length === 0 ? (
               <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
-                暂无商品上架，点击“发布数字商品”提交！
+                No items listed yet. Click &quot;Publish Asset&quot; to list your script!
               </div>
             ) : (
               featuredProducts.map((p) => (
@@ -202,7 +202,7 @@ export default async function RootPortalPage() {
                       {p.category}
                     </span>
                     <h3 className="font-bold text-sm text-slate-100 truncate">{p.title}</h3>
-                    <div className="text-xs text-slate-500">创作者: {p.developer?.username || "开发者"}</div>
+                    <div className="text-xs text-slate-500">Creator: {p.developer?.username || "Developer"}</div>
                   </div>
 
                   <div className="shrink-0 text-right space-y-1">
@@ -210,7 +210,7 @@ export default async function RootPortalPage() {
                       <Coins className="h-4 w-4" />
                       <span>{p.tokenPrice}</span>
                     </div>
-                    <div className="text-[10px] text-slate-500">已售 {p.salesCount}</div>
+                    <div className="text-[10px] text-slate-500">{p.salesCount} sold</div>
                   </div>
                 </Link>
               ))

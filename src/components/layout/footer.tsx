@@ -1,24 +1,41 @@
+import Link from "next/link";
+import { ShieldCheck, ExternalLink } from "lucide-react";
+
 export function Footer() {
   return (
-    <footer className="border-t border-slate-800/80 bg-slate-950/90 py-8 text-xs text-slate-400">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-4 text-center sm:text-left">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-200">Valax Scrub BBS & Trade</span>
-            <span className="text-slate-600">|</span>
-            <span>https://bbs-and-trade.valaxscrub.shop</span>
+    <footer className="w-full border-t border-slate-800/80 bg-slate-950/60 py-8 text-slate-400 text-xs mt-auto">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-200 text-sm">Valax Scrub BBS and Trade</span>
+              <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">Subplatform</span>
+            </div>
+            <p className="text-[11px] text-slate-400 max-w-xl">
+              Independent community board and digital marketplace for the Valax Scrub ecosystem. Main site: <a href="https://valaxscrub.shop" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">valaxscrub.shop</a>.
+            </p>
           </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>Serverless Edge Ready</span>
-            <span>•</span>
-            <span>Turso LibSQL Dual-Ledger</span>
+
+          <div className="flex items-center gap-4 text-xs">
+            <Link href="/bbs" className="hover:text-white transition-colors">BBS Forum</Link>
+            <Link href="/market" className="hover:text-white transition-colors">Marketplace</Link>
+            <Link href="/wallet" className="hover:text-white transition-colors">Utility Ledger</Link>
           </div>
         </div>
 
-        {/* Mandatory Non-Financial Disclaimer */}
-        <div className="p-3.5 rounded-lg border border-slate-800 bg-slate-900/50 text-[11px] text-slate-400 leading-relaxed">
-          <strong className="text-slate-300">特别法律与业务合规说明：</strong>
-          Valax Token（站内积分）仅定义为 Valax Scrub 站内非金融 Utility Credit，仅用于购买站内数字商品、服务与社区权益，不代表股份、债权、证券、投资份额或收益承诺。本站严禁现金提现、真实投资承诺、博彩或非法交易。
+        {/* Legal Disclaimer */}
+        <div className="pt-4 border-t border-slate-800/60 text-[11px] text-slate-400 space-y-1.5">
+          <div className="flex items-center gap-1.5 font-semibold text-slate-300">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Compliance & Token Classification Statement</span>
+          </div>
+          <p>
+            Valax Utility Credits are non-financial utility tokens designed exclusively for in-platform digital items, developer tool access, and community benefits. They do not represent equity, debt, securities, investment contracts, or profit distribution promises.
+          </p>
+          <div className="flex items-center justify-between pt-2 text-slate-500">
+            <span>&copy; {new Date().getFullYear()} Valax Scrub. All rights reserved.</span>
+            <span>Target Domain: bbs-and-trade.valaxscrub.shop</span>
+          </div>
         </div>
       </div>
     </footer>

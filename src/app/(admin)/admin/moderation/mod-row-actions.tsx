@@ -2,75 +2,95 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle, XCircle, Trash2, Pin } from "lucide-react";
+import { Check, X, ShieldAlert } from "lucide-react";
 
-export function ModRowActions({
-  type,
-  targetId,
+export function ModerationRowActions({
+  reportId,
+  productId,
 }: {
-  type: "resolve_report" | "delete_thread" | "pin_thread" | "approve_product" | "reject_product";
-  targetId: string;
+  reportId?: string;
+  productId?: string;
 }) {
   const router = useRouter();
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleAction = async () => {
-    setIsProcessing(true);
+  const handleReportAction = async (action: "dismiss" | "delete_content") => {
+    setIsLoading(true);
     try {
-      await fetch("/api/admin/moderation", {
+      const res = await fetch("/api/admin/moderation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, targetId }),
+        body: JSON.stringify({ type: "report", reportId, action }),
       });
+      if (!res.ok) throw new Error("Action failed");
       router.refresh();
-    } catch {} finally {
-      setIsProcessing(false);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  if (type === "resolve_report") {
+  const handleProductAction = async (action: "approve" | "reject") => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/admin/moderation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "product", productId, action }),
+      });
+      if (!res.ok) throw new Error("Action failed");
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (reportId) {
     return (
-      <button
-        disabled={isProcessing}
-        onClick={handleAction}
-        className="px-3 py-1 rounded-lg bg-emerald-950/60 border border-emerald-700/50 text-emerald-400 text-xs font-semibold hover:bg-emerald-900/60"
-      >
-        标记已处理
-      </button>
+      <div className="flex items-center gap-2 justify-end">
+        <button
+          onClick={() => handleReportAction("dismiss")}
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs"
+        >
+          Dismiss
+        </button>
+        <button
+          onClick={() => handleReportAction("delete_content")}
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-red-950 border border-red-700 text-red-300 hover:bg-red-900 text-xs font-semibold"
+        >
+          Delete Target
+        </button>
+      </div>
     );
   }
 
-  if (type === "approve_product") {
+  if (productId) {
     return (
-      <button
-        disabled={isProcessing}
-        onClick={handleAction}
-        className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
-      >
-        批准上架
-      </button>
+      <div className="flex items-center gap-2 justify-end">
+        <button
+          onClick={() => handleProductAction("approve")}
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 hover:bg-emerald-900 text-xs font-semibold flex items-center gap-1"
+        >
+          <Check className="h-3 w-3" />
+          Approve
+        </button>
+        <button
+          onClick={() => handleProductAction("reject")}
+          disabled={isLoading}
+          className="px-2.5 py-1 rounded bg-red-950 border border-red-700 text-red-300 hover:bg-red-900 text-xs font-semibold flex items-center gap-1"
+        >
+          <X className="h-3 w-3" />
+          Reject
+        </button>
+      </div>
     );
   }
 
-  if (type === "reject_product") {
-    return (
-      <button
-        disabled={isProcessing}
-        onClick={handleAction}
-        className="px-3 py-1 rounded-lg bg-red-950/60 border border-red-700/50 text-red-400 text-xs font-semibold hover:bg-red-900/60"
-      >
-        驳回
-      </button>
-    );
-  }
-
-  return (
-    <button
-      disabled={isProcessing}
-      onClick={handleAction}
-      className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs hover:bg-slate-700"
-    >
-      执行
-    </button>
-  );
+  return null;
 }

@@ -10,6 +10,8 @@ import { Pin, CheckCircle2, MessageSquare, Award, Clock } from "lucide-react";
 import { ReplyComposer } from "./reply-composer";
 import { InteractiveActions } from "./interactive-actions";
 
+export const dynamic = "force-dynamic";
+
 export default async function ThreadDetailPage({
   params,
 }: {
@@ -94,7 +96,7 @@ export default async function ThreadDetailPage({
     <div className="space-y-8 max-w-5xl mx-auto">
       <div className="flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2">
-          <Link href="/bbs" className="hover:text-white transition-colors">BBS 论坛</Link>
+          <Link href="/bbs" className="hover:text-white transition-colors">BBS Forum</Link>
           <span>/</span>
           <Link href={`/bbs/${thread.board.slug}`} className="hover:text-blue-400 transition-colors text-blue-400">
             {thread.board.name}
@@ -102,7 +104,7 @@ export default async function ThreadDetailPage({
         </div>
         <div className="flex items-center gap-2 text-slate-500">
           <Clock className="h-3.5 w-3.5" />
-          <span>{new Date(thread.createdAt).toLocaleString("zh-CN")}</span>
+          <span>{new Date(thread.createdAt).toLocaleString("en-US")}</span>
         </div>
       </div>
 
@@ -111,12 +113,12 @@ export default async function ThreadDetailPage({
           <div className="flex flex-wrap items-center gap-2">
             {thread.isPinned && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-xs font-semibold border border-amber-500/30">
-                <Pin className="h-3 w-3" /> 置顶公告
+                <Pin className="h-3 w-3" /> Pinned Announcement
               </span>
             )}
             {thread.isResolved && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/30">
-                <CheckCircle2 className="h-3 w-3" /> 已解决
+                <CheckCircle2 className="h-3 w-3" /> Solved
               </span>
             )}
             {tagsList.map((tag) => (
@@ -155,7 +157,7 @@ export default async function ThreadDetailPage({
                 </div>
                 <div className="text-xs text-slate-400 flex items-center gap-1">
                   <Award className="h-3 w-3 text-amber-400" />
-                  <span>信誉声望: {thread.author.reputationScore}</span>
+                  <span>Reputation: {thread.author.reputationScore}</span>
                 </div>
               </div>
             </div>
@@ -177,14 +179,14 @@ export default async function ThreadDetailPage({
       <div className="space-y-6">
         <h2 className="text-lg font-bold text-white flex items-center gap-2">
           <MessageSquare className="h-5 w-5 text-blue-400" />
-          <span>回复与讨论</span>
-          <span className="text-xs font-normal text-slate-400">({replies.length} 条)</span>
+          <span>Replies & Discussion</span>
+          <span className="text-xs font-normal text-slate-400">({replies.length} replies)</span>
         </h2>
 
         <div className="space-y-4">
           {replies.length === 0 ? (
             <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/20 text-slate-400 text-sm">
-              暂无回复，发表你的见解吧！
+              No replies yet. Share your technical thoughts or answers!
             </div>
           ) : (
             replies.map((r, index) => (
@@ -216,12 +218,12 @@ export default async function ThreadDetailPage({
                         <span className="font-semibold text-xs text-slate-200">{r.author.username}</span>
                         {r.isSolution && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40">
-                            <CheckCircle2 className="h-3 w-3" /> 最佳解决方案
+                            <CheckCircle2 className="h-3 w-3" /> Best Solution
                           </span>
                         )}
                       </div>
                       <span className="text-[10px] text-slate-500">
-                        #{index + 1} 楼 • {new Date(r.createdAt).toLocaleString("zh-CN")}
+                        Floor #{index + 1} • {new Date(r.createdAt).toLocaleString("en-US")}
                       </span>
                     </div>
                   </div>
