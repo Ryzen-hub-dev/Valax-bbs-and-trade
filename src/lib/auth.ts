@@ -1,20 +1,28 @@
 import { Discord } from "arctic";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { users, sessions, walletAccounts } from "@/db/schema";
+import { users, sessions } from "@/db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { getSafeOAuthCallbackBase } from "@/config/origins";
 
-const clientId = process.env.DISCORD_CLIENT_ID || "1492451629595627660";
-const clientSecret = process.env.DISCORD_CLIENT_SECRET || "";
+/**
+ * Returns a configured Discord OAuth client.
+ * Strictly requires DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET (fails closed if missing).
+ * Uses allowlist-validated Origin for callback URL.
+ */
+export function getDiscordClient(originCandidate?: string | null): Discord {
+  const clientId = process.env.DISCORD_CLIENT_ID;
+  const clientSecret = process.env.DISCORD_CLIENT_SECRET;
 
-export function getDiscordClient(origin?: string): Discord {
-  let baseUrl = process.env.DISCORD_REDIRECT_URI;
-  if (!baseUrl) {
-    const host = origin || process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    baseUrl = `${host.replace(/\/$/, "")}/api/auth/callback/discord`;
+  if (!clientId || !clientSecret || clientId.trim() === "" || clientSecret.trim() === "") {
+    throw new Error("DISCORD_OAUTH_NOT_CONFIGURED: Both DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET must be configured.");
   }
-  return new Discord(clientId, clientSecret, baseUrl);
+
+  const safeOrigin = getSafeOAuthCallbackBase(originCandidate);
+  const redirectUri = `${safeOrigin}/api/auth/callback/discord`;
+
+  return new Discord(clientId.trim(), clientSecret.trim(), redirectUri);
 }
 
 export const SESSION_COOKIE_NAME = "valax_session_token";
@@ -55,7 +63,7 @@ export async function getCurrentSession(): Promise<UserSession | null> {
 
     return { user, session };
   } catch (err) {
-    console.error("Session lookup error:", err);
+    console.error("[Auth] Session lookup error:", err);
     return null;
   }
 }
@@ -68,8 +76,8 @@ export async function createSession(userId: string, userAgent?: string, ipAddres
     id: token,
     userId,
     expiresAt,
-    userAgent: userAgent?.slice(0, 500),
-    ipAddress: ipAddress?.slice(0, 100),
+    userAgent: userAgent ? userAgent.slice(0, 500) : null,
+    ipAddress: ipAddress ? ipAddress.slice(0, 100) : null,
   });
 
   return token;

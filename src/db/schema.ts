@@ -1,4 +1,4 @@
-﻿import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // 1. Users Table
@@ -23,7 +23,7 @@ export const users = sqliteTable("users", {
 
 // 2. User Sessions (Revocable)
 export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(), // Session token hash
+  id: text("id").primaryKey(), // Nanoid(48)
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
@@ -34,7 +34,7 @@ export const sessions = sqliteTable("sessions", {
   expiresAtIdx: index("sessions_expires_at_idx").on(table.expiresAt),
 }));
 
-// 3. Valax Token Wallet Accounts
+// 3. Valax Utility Credit Wallet Accounts
 export const walletAccounts = sqliteTable("wallet_accounts", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
@@ -54,7 +54,7 @@ export const walletLedger = sqliteTable("wallet_ledger", {
   amount: integer("amount").notNull(), // signed delta (+ / -)
   balanceBefore: integer("balance_before").notNull(),
   balanceAfter: integer("balance_after").notNull(),
-  type: text("type").notNull(), // 'reward' | 'purchase_product' | 'sale_revenue' | 'admin_adjustment' | 'paypal_credit_purchase' | 'fee_deduction'
+  type: text("type").notNull(), // 'reward' | 'purchase_product' | 'admin_adjustment' | 'paypal_credit_purchase' | 'fee_deduction'
   source: text("source").notNull(),
   referenceId: text("reference_id"),
   idempotencyKey: text("idempotency_key").notNull().unique(),
@@ -91,7 +91,7 @@ export const forumThreads = sqliteTable("forum_threads", {
   title: text("title").notNull(),
   slug: text("slug").notNull().unique(),
   content: text("content").notNull(),
-  tags: text("tags").default("[]").notNull(), // JSON array string
+  tags: text("tags").default("[]").notNull(), // JSON array string (backward-compatible cache)
   isPinned: integer("is_pinned", { mode: "boolean" }).default(false).notNull(),
   isHighlighted: integer("is_highlighted", { mode: "boolean" }).default(false).notNull(),
   isLocked: integer("is_locked", { mode: "boolean" }).default(false).notNull(),
@@ -129,7 +129,29 @@ export const forumReplies = sqliteTable("forum_replies", {
   createdAtIdx: index("replies_created_at_idx").on(table.createdAt),
 }));
 
-// 8. Likes and Bookmarks
+// 8. Normalized Forum Tags
+export const forumTags = sqliteTable("forum_tags", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  usageCount: integer("usage_count").default(0).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+}, (table) => ({
+  slugIdx: index("forum_tags_slug_idx").on(table.slug),
+  usageCountIdx: index("forum_tags_usage_count_idx").on(table.usageCount),
+}));
+
+// 9. Forum Thread-to-Tag Junction Table
+export const forumThreadTags = sqliteTable("forum_thread_tags", {
+  threadId: text("thread_id").notNull().references(() => forumThreads.id, { onDelete: "cascade" }),
+  tagId: text("tag_id").notNull().references(() => forumTags.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+}, (table) => ({
+  threadTagPk: uniqueIndex("forum_thread_tag_unique_idx").on(table.threadId, table.tagId),
+  tagIdIdx: index("forum_thread_tag_tag_idx").on(table.tagId),
+}));
+
+// 10. Likes
 export const forumLikes = sqliteTable("forum_likes", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -141,6 +163,7 @@ export const forumLikes = sqliteTable("forum_likes", {
   targetIdx: index("likes_target_idx").on(table.targetType, table.targetId),
 }));
 
+// 11. Bookmarks
 export const forumBookmarks = sqliteTable("forum_bookmarks", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -151,7 +174,7 @@ export const forumBookmarks = sqliteTable("forum_bookmarks", {
   userTargetBookmarkUnique: uniqueIndex("user_target_bookmark_idx").on(table.userId, table.targetType, table.targetId),
 }));
 
-// 9. Digital Marketplace Products
+// 12. Digital Marketplace Products
 export const products = sqliteTable("products", {
   id: text("id").primaryKey(),
   developerId: text("developer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -161,7 +184,7 @@ export const products = sqliteTable("products", {
   description: text("description").notNull(),
   category: text("category").notNull(), // 'Scripts' | 'Templates' | 'Tools' | 'Services'
   tokenPrice: integer("token_price").notNull(), // Utility credits
-  fiatPriceUsd: integer("fiat_price_usd").default(0).notNull(), // optional USD reference (cents)
+  fiatPriceUsd: integer("fiat_price_usd").default(0).notNull(),
   currency: text("currency").default("USD").notNull(),
   version: text("version").default("1.0.0").notNull(),
   compatibility: text("compatibility").default("Valax Standard").notNull(),
@@ -185,7 +208,7 @@ export const products = sqliteTable("products", {
   moderationStatusIdx: index("products_mod_status_idx").on(table.moderationStatus),
 }));
 
-// 10. Product Purchases and Licenses
+// 13. Digital Product Purchases and Entitlements
 export const productPurchases = sqliteTable("product_purchases", {
   id: text("id").primaryKey(),
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
@@ -194,13 +217,15 @@ export const productPurchases = sqliteTable("product_purchases", {
   licenseKey: text("license_key").notNull().unique(),
   status: text("status", { enum: ["active", "revoked", "refunded"] }).default("active").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
 }, (table) => ({
   productIdIdx: index("purchases_product_id_idx").on(table.productId),
   buyerIdIdx: index("purchases_buyer_id_idx").on(table.buyerId),
   licenseKeyIdx: index("purchases_license_key_idx").on(table.licenseKey),
+  buyerProductStatusIdx: index("purchases_buyer_product_status_idx").on(table.buyerId, table.productId, table.status),
 }));
 
-// 11. PayPal Orders
+// 14. PayPal Orders
 export const ordersPaypal = sqliteTable("orders_paypal", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -216,7 +241,7 @@ export const ordersPaypal = sqliteTable("orders_paypal", {
   paypalOrderIdIdx: index("orders_paypal_order_id_idx").on(table.paypalOrderId),
 }));
 
-// 12. Moderation Reports
+// 15. Moderation Reports
 export const reports = sqliteTable("reports", {
   id: text("id").primaryKey(),
   reporterId: text("reporter_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -233,7 +258,24 @@ export const reports = sqliteTable("reports", {
   targetIdx: index("reports_target_idx").on(table.targetType, table.targetId),
 }));
 
-// 13. Audit Logs
+// 16. In-App Notifications
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+  type: text("type").notNull(), // 'reply' | 'solution' | 'entitlement' | 'system' | 'report_action'
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  link: text("link"),
+  isRead: integer("is_read", { mode: "boolean" }).default(false).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+}, (table) => ({
+  userIdIdx: index("notifications_user_id_idx").on(table.userId),
+  isReadIdx: index("notifications_is_read_idx").on(table.userId, table.isRead),
+  createdAtIdx: index("notifications_created_at_idx").on(table.createdAt),
+}));
+
+// 17. Immutable Audit Logs
 export const auditLogs = sqliteTable("audit_logs", {
   id: text("id").primaryKey(),
   operatorId: text("operator_id").notNull().references(() => users.id),
@@ -248,7 +290,7 @@ export const auditLogs = sqliteTable("audit_logs", {
   createdAtIdx: index("audit_created_at_idx").on(table.createdAt),
 }));
 
-// 14. System Settings (Feature Flags)
+// 18. System Settings (Feature Flags & Policies)
 export const systemSettings = sqliteTable("system_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
