@@ -9,7 +9,6 @@ export interface RateLimitConfig {
   failClosed?: boolean; // When true, rejects traffic if database query fails (mandatory for financial/admin operations)
 }
 
-// Bounded in-memory LRU map to avoid memory leaks across long-lived Serverless instances
 const MAX_LOCAL_CACHE_SIZE = 5000;
 const memoryCache = new Map<string, { count: number; resetAt: number }>();
 let lastDbCleanupTime = 0;
@@ -136,7 +135,12 @@ export async function checkRateLimitAsync(
       }
     }
 
-    // Fallback if RETURNING yielded empty array
+    // Fail-Closed check on empty RETURNING array
+    if (config.failClosed) {
+      console.warn(`[RateLimit FAIL_CLOSED] Empty RETURNING array on key "${key}". Denying request.`);
+      return { allowed: false, remaining: 0, resetInSeconds: config.windowSeconds };
+    }
+
     return { allowed: true, remaining: config.maxRequests - 1, resetInSeconds: config.windowSeconds };
   } catch (err) {
     // 4. Fail-closed handling for high-risk operations (Purchases, PayPal, Admin adjustments)

@@ -1,9 +1,10 @@
 import { db } from "@/db";
-import { reports, forumThreads, products, auditLogs } from "@/db/schema";
-import { requireModerator } from "@/lib/rbac";
+import { reports, forumThreads, products, auditLogs, users } from "@/db/schema";
+import { requirePermission, requireModerator } from "@/lib/rbac";
 import { validateCsrfOrigin } from "@/lib/csrf";
-import { handleApiError } from "@/lib/errors";
-import { eq } from "drizzle-orm";
+import { handleApiError, generateRequestId } from "@/lib/errors";
+import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
+import { eq, desc, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -14,13 +15,38 @@ export const dynamic = "force-dynamic";
 const modActionSchema = z.object({
   type: z.enum(["resolve_report", "delete_thread", "pin_thread", "approve_product", "reject_product"]),
   targetId: z.string().min(1),
-  note: z.string().optional(),
+  note: z.string().max(500).optional(),
 });
+
+export async function GET(req: NextRequest) {
+  try {
+    await requireModerator(req);
+
+    const pendingReports = await db
+      .select()
+      .from(reports)
+      .where(eq(reports.status, "pending"))
+      .orderBy(desc(reports.createdAt))
+      .limit(50);
+
+    const pendingProducts = await db
+      .select()
+      .from(products)
+      .where(eq(products.moderationStatus, "pending"))
+      .orderBy(desc(products.createdAt))
+      .limit(50);
+
+    return NextResponse.json({
+      reports: pendingReports,
+      pendingProducts,
+    });
+  } catch (err: any) {
+    return handleApiError(err, { publicMessage: "Failed to load moderation queue.", route: "/api/admin/moderation" });
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const modUser = await requireModerator();
-
     const csrf = validateCsrfOrigin(req);
     if (!csrf.isValid) {
       return csrf.errorResponse!;
@@ -28,6 +54,28 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { type, targetId, note } = modActionSchema.parse(body);
+
+    let modUser: typeof users.$inferSelect;
+
+    if (type === "resolve_report") {
+      modUser = await requirePermission("forum.report.review", req);
+    } else if (type === "approve_product" || type === "reject_product") {
+      modUser = await requirePermission("product.review", req);
+    } else {
+      modUser = await requirePermission("forum.thread.moderate", req);
+    }
+
+    const clientIp = getClientIp(req);
+    const rate = await checkRateLimitAsync(`mod_actions:${modUser.id}:${clientIp}`, {
+      maxRequests: 30,
+      windowSeconds: 60,
+      failClosed: true,
+    });
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Too many moderation requests. Please wait." }, { status: 429 });
+    }
+
+    const requestId = generateRequestId();
 
     if (type === "resolve_report") {
       await db
@@ -53,11 +101,11 @@ export async function POST(req: NextRequest) {
       action: `MOD_${type.toUpperCase()}`,
       targetType: type.includes("report") ? "report" : type.includes("product") ? "product" : "thread",
       targetId,
-      details: JSON.stringify({ note }),
+      details: JSON.stringify({ note, requestId }),
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, requestId, message: `Moderation action '${type}' executed.` });
   } catch (err: any) {
-    return handleApiError(err, { publicMessage: "Moderation action failed." });
+    return handleApiError(err, { publicMessage: "Moderation action failed.", route: "/api/admin/moderation" });
   }
 }

@@ -1,10 +1,11 @@
 import { db } from "@/db";
 import { forumReplies, forumThreads } from "@/db/schema";
-import { getCurrentSession } from "@/lib/auth";
-import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { requirePermission } from "@/lib/rbac";
+import { requireFeatureFlag } from "@/lib/flags";
+import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError } from "@/lib/errors";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -14,28 +15,26 @@ export const dynamic = "force-dynamic";
 
 const replySchema = z.object({
   threadId: z.string().min(1),
-  content: z.string().min(2).max(20000),
+  content: z.string().min(2).max(10000),
   parentReplyId: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getCurrentSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
-  }
-
-  const csrf = validateCsrfOrigin(req);
-  if (!csrf.isValid) {
-    return csrf.errorResponse!;
-  }
-
-  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown_ip";
-  const rate = await checkRateLimitAsync(`reply_post:${session.user.id}:${clientIp}`, { maxRequests: 10, windowSeconds: 60 });
-  if (!rate.allowed) {
-    return NextResponse.json({ error: "Rate limit exceeded. Please wait a moment before replying again." }, { status: 429 });
-  }
-
   try {
+    await requireFeatureFlag("REPLIES_ENABLED");
+    const user = await requirePermission("forum.reply.create", req);
+
+    const csrf = validateCsrfOrigin(req);
+    if (!csrf.isValid) {
+      return csrf.errorResponse!;
+    }
+
+    const clientIp = getClientIp(req);
+    const rate = await checkRateLimitAsync(`reply_post:${user.id}:${clientIp}`, { maxRequests: 10, windowSeconds: 60 });
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded. Please wait a moment." }, { status: 429 });
+    }
+
     const body = await req.json();
     const { threadId, content, parentReplyId } = replySchema.parse(body);
 
@@ -45,26 +44,17 @@ export async function POST(req: NextRequest) {
     }
 
     const replyId = `rep_${nanoid(16)}`;
-
     await db.insert(forumReplies).values({
       id: replyId,
       threadId,
-      authorId: session.user.id,
+      authorId: user.id,
       parentReplyId: parentReplyId || null,
       content,
       status: "published",
     });
 
-    await db
-      .update(forumThreads)
-      .set({
-        repliesCount: sql`${forumThreads.repliesCount} + 1`,
-        lastReplyAt: new Date(),
-      })
-      .where(eq(forumThreads.id, threadId));
-
     return NextResponse.json({ success: true, replyId });
   } catch (err: any) {
-    return handleApiError(err, { publicMessage: "Failed to submit reply." });
+    return handleApiError(err, { publicMessage: "Failed to post reply.", route: "/api/bbs/replies" });
   }
 }

@@ -1,3 +1,4 @@
+import { requireFeatureFlag } from "@/lib/flags";
 import { db } from "@/db";
 import { products, users } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
@@ -79,7 +80,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getCurrentSession(req);
+  await requireFeatureFlag("PRODUCT_PUBLISH_ENABLED");
+    const session = await getCurrentSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }

@@ -1,3 +1,4 @@
+import { requireFeatureFlag } from "@/lib/flags";
 import { db } from "@/db";
 import { products, productPurchases, ordersMarket, walletLedger, auditLogs } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
@@ -22,7 +23,8 @@ const LEASE_DURATION_MS = 30000; // 30 seconds processing lease
 
 export async function POST(req: NextRequest) {
   // 1. Authenticate Session
-  const session = await getCurrentSession(req);
+  await requireFeatureFlag("MARKET_PURCHASE_ENABLED");
+    const session = await getCurrentSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }

@@ -4,6 +4,7 @@ import { getSafeOrigin } from "@/config/origins";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -20,14 +21,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const discord = getDiscordClient(safeOrigin);
     const state = generateState();
-    const url = discord.createAuthorizationURL(state, ["identify", "email"]);
+    // Strictly request 'identify' scope only (Least Privilege principle)
+    const url = discord.createAuthorizationURL(state, ["identify"]);
 
     const cookieStore = cookies();
-    cookieStore.set("discord_oauth_state", state, {
+    cookieStore.set("valax_oauth_state", state, {
       path: "/",
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      maxAge: 60 * 10, // 10 minutes
+      maxAge: 60 * 10, // 10 minutes expiry
       sameSite: "lax",
     });
 

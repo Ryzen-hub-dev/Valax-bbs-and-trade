@@ -1,7 +1,8 @@
 import { db } from "@/db";
 import { forumThreads, users, forumBoards } from "@/db/schema";
-import { getCurrentSession } from "@/lib/auth";
-import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { requirePermission } from "@/lib/rbac";
+import { requireFeatureFlag } from "@/lib/flags";
+import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError } from "@/lib/errors";
 import { eq, desc, and } from "drizzle-orm";
@@ -20,23 +21,21 @@ const createThreadSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getCurrentSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
-  }
-
-  const csrf = validateCsrfOrigin(req);
-  if (!csrf.isValid) {
-    return csrf.errorResponse!;
-  }
-
-  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown_ip";
-  const rate = await checkRateLimitAsync(`thread_post:${session.user.id}:${clientIp}`, { maxRequests: 5, windowSeconds: 120 });
-  if (!rate.allowed) {
-    return NextResponse.json({ error: "Rate limit exceeded. Please wait before creating another thread." }, { status: 429 });
-  }
-
   try {
+    await requireFeatureFlag("THREAD_CREATION_ENABLED");
+    const user = await requirePermission("forum.thread.create", req);
+
+    const csrf = validateCsrfOrigin(req);
+    if (!csrf.isValid) {
+      return csrf.errorResponse!;
+    }
+
+    const clientIp = getClientIp(req);
+    const rate = await checkRateLimitAsync(`thread_post:${user.id}:${clientIp}`, { maxRequests: 5, windowSeconds: 120 });
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded. Please wait before creating another thread." }, { status: 429 });
+    }
+
     const body = await req.json();
     const { boardId, title, content, tags } = createThreadSchema.parse(body);
 
@@ -51,7 +50,7 @@ export async function POST(req: NextRequest) {
     await db.insert(forumThreads).values({
       id: threadId,
       boardId,
-      authorId: session.user.id,
+      authorId: user.id,
       title,
       slug,
       content,
@@ -61,6 +60,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, slug });
   } catch (err: any) {
-    return handleApiError(err, { publicMessage: "Failed to publish discussion thread." });
+    return handleApiError(err, { publicMessage: "Failed to publish discussion thread.", route: "/api/bbs/threads" });
   }
 }

@@ -1,3 +1,4 @@
+import { requireFeatureFlag } from "@/lib/flags";
 import { db } from "@/db";
 import { walletLedger, walletAccounts, auditLogs } from "@/db/schema";
 import { requireAdmin } from "@/lib/rbac";
@@ -27,6 +28,7 @@ const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_-]{8,128}$/;
 
 export async function POST(req: NextRequest) {
   try {
+    await requireFeatureFlag("ADMIN_LEDGER_ADJUST_ENABLED");
     const adminUser = await requireAdmin(req);
 
     const csrf = validateCsrfOrigin(req);
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Compute cryptographic request fingerprint to detect key reuse conflicts
+    // Compute cryptographic request fingerprint binding operator, target, amount, and reason
     const normalizedReason = reason.trim().toLowerCase();
     const requestFingerprint = createHash("sha256")
       .update(`${adminUser.id}:${targetUserId}:${amount}:${normalizedReason}`)
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest) {
 
     const namespacedLedgerKey = `admin_adjust_${adminUser.id}_${rawIdempotencyKey}`;
 
-    // 1. Idempotency Check
+    // 1. Idempotency Check with Complete 4-Field Fingerprint Validation
     const existingEntry = (
       await db
         .select()
@@ -91,10 +93,14 @@ export async function POST(req: NextRequest) {
     )[0];
 
     if (existingEntry) {
-      // Verify if previous request had identical parameters
-      if (existingEntry.userId !== targetUserId || existingEntry.amount !== amount) {
+      const isOperatorMatch = existingEntry.operatorId === adminUser.id;
+      const isTargetMatch = existingEntry.userId === targetUserId;
+      const isAmountMatch = existingEntry.amount === amount;
+      const isFingerprintMatch = existingEntry.notes?.includes(`[FP:${requestFingerprint}]`);
+
+      if (!isOperatorMatch || !isTargetMatch || !isAmountMatch || !isFingerprintMatch) {
         return NextResponse.json(
-          { error: "Idempotency conflict: This Idempotency-Key was previously used with different adjustment parameters." },
+          { error: "Idempotency conflict: This Idempotency-Key was previously used with different parameters (operator, target, amount, or reason)." },
           { status: 409 }
         );
       }
@@ -131,7 +137,7 @@ export async function POST(req: NextRequest) {
       source: `Admin Manual Adjustment by ${adminUser.username}`,
       operatorId: adminUser.id,
       idempotencyKey: namespacedLedgerKey,
-      notes: reason,
+      notes: `[FP:${requestFingerprint}] ${reason}`,
     });
 
     if (!result.success) {

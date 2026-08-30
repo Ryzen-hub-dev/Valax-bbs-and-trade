@@ -35,7 +35,7 @@ export function sanitizeErrorMessage(err: unknown): string {
   if (!err) return "An unexpected error occurred.";
   if (typeof err === "string") return redactSensitiveData(err);
   if (err instanceof Error) {
-    if (err.message.startsWith("UNAUTHORIZED_ADMIN")) {
+    if (err.message.startsWith("FEATURE_DISABLED")) { return err.message.replace("FEATURE_DISABLED: ", ""); } if (err.message.startsWith("UNAUTHORIZED_ADMIN")) {
       return "Forbidden. Administrative privileges required.";
     }
     if (err.message.startsWith("UNAUTHORIZED")) {
@@ -59,7 +59,7 @@ export function handleApiError(
 
   let status = options?.status || 500;
   if (err instanceof Error) {
-    if (err.message.startsWith("UNAUTHORIZED_ADMIN") || err.message.startsWith("UNAUTHORIZED_MODERATOR")) {
+    if (err.message.startsWith("FEATURE_DISABLED")) { status = 403; } else if (err.message.startsWith("UNAUTHORIZED_ADMIN") || err.message.startsWith("UNAUTHORIZED_MODERATOR")) {
       status = 403;
     } else if (err.message.startsWith("UNAUTHORIZED")) {
       status = 401;
