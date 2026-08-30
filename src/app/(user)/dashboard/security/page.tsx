@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Shield, Smartphone, Laptop, Globe, LogOut, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Shield, Smartphone, Laptop, Globe, LogOut, CheckCircle2, AlertTriangle, RefreshCw, KeyRound, Radio } from "lucide-react";
+import { MotionContainer } from "@/components/animations/MotionContainer";
 
 interface SessionInfo {
   publicSessionId: string;
@@ -86,33 +87,37 @@ export default function SecurityDashboardPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-12 max-w-4xl">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-            <Shield className="w-8 h-8 text-primary" />
+    <div className="mx-auto max-w-4xl py-6 space-y-8">
+      {/* Header Banner */}
+      <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-gradient-to-r from-obsidian-900 via-obsidian-950 to-obsidian-900 p-8 sm:p-10 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="space-y-2 max-w-xl">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full badge-cyan text-xs font-semibold">
+            <Shield className="h-3.5 w-3.5" />
+            <span>Cryptographic Session Isolation</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
             Security & Active Sessions
           </h1>
-          <p className="text-neutral-400 mt-1 text-sm">
-            Inspect active login sessions across your devices and revoke untrusted access.
+          <p className="text-xs text-neutral-400 leading-relaxed">
+            Inspect active login sessions across devices. Revoke unrecognized access instantly with zero token exposure.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
           <button
             onClick={fetchSessions}
             disabled={loading}
-            className="px-3 py-2 text-sm bg-neutral-900 border border-neutral-800 text-neutral-300 rounded-lg hover:border-neutral-700 hover:text-white transition flex items-center gap-2"
+            className="px-3.5 py-2 text-xs font-semibold bg-obsidian-850 border border-white/[0.08] text-neutral-300 rounded-xl hover:border-white/[0.16] hover:text-white transition flex items-center gap-2"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </button>
           <button
             onClick={handleRevokeOthers}
             disabled={actionLoading || sessions.length <= 1}
-            className="px-4 py-2 text-sm bg-red-950/40 border border-red-800/60 text-red-300 rounded-lg hover:bg-red-900/50 hover:border-red-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-xs font-bold bg-red-950/60 border border-red-800/60 text-red-300 rounded-xl hover:bg-red-900/60 transition flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3.5 h-3.5" />
             Log Out Other Devices
           </button>
         </div>
@@ -120,74 +125,81 @@ export default function SecurityDashboardPage() {
 
       {message && (
         <div
-          className={`p-4 rounded-xl border mb-6 flex items-center gap-3 text-sm ${
+          className={`p-4 rounded-2xl border flex items-center gap-3 text-xs ${
             message.type === "success"
               ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
               : "bg-red-950/40 border-red-800/60 text-red-300"
           }`}
         >
           {message.type === "success" ? (
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-emerald-400" />
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-400" />
           ) : (
-            <AlertTriangle className="w-5 h-5 flex-shrink-0 text-red-400" />
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 text-red-400" />
           )}
           <span>{message.text}</span>
         </div>
       )}
 
       {loading ? (
-        <div className="p-12 text-center text-neutral-500 bg-neutral-900/30 border border-neutral-800 rounded-2xl">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3 text-primary" />
-          <p>Loading active sessions...</p>
+        <div className="p-16 text-center text-neutral-400 glass-card rounded-2xl space-y-3">
+          <RefreshCw className="w-6 h-6 animate-spin mx-auto text-amber-400" />
+          <p className="text-xs">Loading active cryptographic sessions...</p>
         </div>
       ) : sessions.length === 0 ? (
-        <div className="p-12 text-center text-neutral-400 bg-neutral-900/30 border border-neutral-800 rounded-2xl">
-          <p>No active sessions found.</p>
+        <div className="p-16 text-center text-neutral-400 glass-card rounded-2xl">
+          <p className="text-xs">No active sessions found.</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <MotionContainer direction="up" stagger={0.06} className="space-y-4">
           {sessions.map((sess) => {
             const isMobile = /mobile|android|iphone|ipad/i.test(sess.userAgent);
             return (
               <div
                 key={sess.publicSessionId}
-                className={`p-5 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                className={`p-6 rounded-2xl glass-card transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-5 ${
                   sess.isCurrent
-                    ? "bg-primary/5 border-primary/40 shadow-sm shadow-primary/5"
-                    : "bg-neutral-900/40 border-neutral-800 hover:border-neutral-700"
+                    ? "border-amber-500/40 bg-amber-500/[0.03] shadow-glow-gold"
+                    : "hover:border-white/[0.14]"
                 }`}
               >
                 <div className="flex items-start gap-4">
                   <div
-                    className={`p-3 rounded-xl ${
-                      sess.isCurrent ? "bg-primary/20 text-primary" : "bg-neutral-800 text-neutral-400"
+                    className={`p-3 rounded-2xl flex items-center justify-center ${
+                      sess.isCurrent ? "bg-amber-500/10 text-amber-400 border border-amber-500/30" : "bg-obsidian-800 text-neutral-400 border border-white/[0.06]"
                     }`}
                   >
-                    {isMobile ? <Smartphone className="w-6 h-6" /> : <Laptop className="w-6 h-6" />}
+                    {isMobile ? <Smartphone className="w-5 h-5" /> : <Laptop className="w-5 h-5" />}
                   </div>
 
-                  <div>
+                  <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-white text-base">
+                      <span className="font-bold text-white text-sm">
                         {isMobile ? "Mobile Device" : "Desktop Browser"}
                       </span>
                       {sess.isCurrent && (
-                        <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-950 border border-emerald-800 text-emerald-400">
-                          Current Device
+                        <span className="badge-emerald inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                          <Radio className="w-2.5 h-2.5 animate-pulse text-emerald-400" />
+                          Current Session
                         </span>
                       )}
                     </div>
 
-                    <p className="text-xs text-neutral-400 mt-1 max-w-md line-clamp-1" title={sess.userAgent}>
+                    <p className="text-xs text-neutral-400 max-w-md line-clamp-1 font-normal" title={sess.userAgent}>
                       {sess.userAgent}
                     </p>
 
-                    <div className="flex items-center gap-4 text-xs text-neutral-500 mt-2">
-                      <span className="flex items-center gap-1.5">
-                        <Globe className="w-3.5 h-3.5" />
+                    <div className="flex flex-wrap items-center gap-4 text-[11px] text-neutral-400 pt-1">
+                      <span className="flex items-center gap-1">
+                        <Globe className="w-3 h-3 text-cyan-400" />
                         {sess.maskedIp}
                       </span>
-                      <span>• Signed in: {new Date(sess.createdAt).toLocaleString()}</span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1 font-mono text-[10px] text-neutral-400">
+                        <KeyRound className="w-3 h-3 text-amber-500" />
+                        {sess.publicSessionId.slice(0, 16)}...
+                      </span>
+                      <span>•</span>
+                      <span>Signed in: {new Date(sess.createdAt).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -196,7 +208,7 @@ export default function SecurityDashboardPage() {
                   <button
                     onClick={() => handleRevokeSession(sess.publicSessionId)}
                     disabled={actionLoading}
-                    className="px-3 py-1.5 text-xs text-red-400 border border-red-900/50 hover:bg-red-950/50 hover:border-red-700 rounded-lg transition self-start sm:self-center"
+                    className="px-3.5 py-1.5 text-xs font-bold text-red-400 border border-red-900/50 hover:bg-red-950/60 hover:border-red-700 rounded-xl transition self-start sm:self-center"
                   >
                     Revoke
                   </button>
@@ -204,7 +216,7 @@ export default function SecurityDashboardPage() {
               </div>
             );
           })}
-        </div>
+        </MotionContainer>
       )}
     </div>
   );
