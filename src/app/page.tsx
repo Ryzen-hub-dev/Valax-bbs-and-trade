@@ -1,23 +1,20 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { forumThreads, products, users, walletLedger } from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
-import { MessageSquare, ShoppingBag, Coins, Sparkles, Code2, Award, ShieldCheck, ArrowRight, Activity, Users, Flame, CheckCircle2 } from "lucide-react";
+import { forumThreads, products, users, forumBoards } from "@/db/schema";
+import { desc, eq } from "drizzle-orm";
+import { MessageSquare, ShoppingBag, Coins, Sparkles, Code2, Award, ShieldCheck, ArrowRight, Lock, KeyRound, CheckCircle2, Flame, ExternalLink, Activity, Users, Shield } from "lucide-react";
+import { HeroNarrative } from "@/components/home/HeroNarrative";
+import { ProductPreviewShowcase } from "@/components/home/ProductPreviewShowcase";
 import { MotionContainer } from "@/components/animations/MotionContainer";
-import { MetricCounter } from "@/components/animations/MetricCounter";
 
 export const dynamic = "force-dynamic";
 
 export default async function RootPortalPage() {
   let hotThreads: any[] = [];
   let featuredProducts: any[] = [];
-  let userCount = 0;
-  let threadCount = 0;
-  let productCount = 0;
-  let ledgerCount = 0;
 
   try {
-    const [threads, prods, uCount, tCount, pCount, lCount] = await Promise.all([
+    const [threads, prods] = await Promise.all([
       db
         .select({
           id: forumThreads.id,
@@ -27,12 +24,14 @@ export default async function RootPortalPage() {
           likesCount: forumThreads.likesCount,
           createdAt: forumThreads.createdAt,
           author: { username: users.username, avatarUrl: users.avatarUrl },
+          board: { name: forumBoards.name, slug: forumBoards.slug },
         })
         .from(forumThreads)
         .innerJoin(users, eq(forumThreads.authorId, users.id))
+        .leftJoin(forumBoards, eq(forumThreads.boardId, forumBoards.id))
         .where(eq(forumThreads.status, "published"))
         .orderBy(desc(forumThreads.likesCount))
-        .limit(5),
+        .limit(4),
       db
         .select({
           id: products.id,
@@ -50,226 +49,291 @@ export default async function RootPortalPage() {
         .where(eq(products.status, "active"))
         .orderBy(desc(products.salesCount))
         .limit(4),
-      db.select({ count: sql<number>`count(*)` }).from(users),
-      db.select({ count: sql<number>`count(*)` }).from(forumThreads),
-      db.select({ count: sql<number>`count(*)` }).from(products),
-      db.select({ count: sql<number>`count(*)` }).from(walletLedger),
     ]);
 
     hotThreads = threads;
     featuredProducts = prods;
-    userCount = Number(uCount[0]?.count || 0);
-    threadCount = Number(tCount[0]?.count || 0);
-    productCount = Number(pCount[0]?.count || 0);
-    ledgerCount = Number(lCount[0]?.count || 0);
   } catch (err) {
-    console.error("Database read warning on landing page:", err);
+    console.error("Database read on landing page:", err);
   }
 
   return (
-    <div className="space-y-16 py-4">
-      {/* Narrative Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-gradient-to-b from-obsidian-900 via-obsidian-950 to-obsidian-950 p-8 sm:p-14 shadow-2xl">
-        {/* Background glow overlay */}
-        <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 h-96 w-[600px] rounded-full bg-amber-500/10 blur-[120px]" />
+    <div className="space-y-20 py-4">
+      {/* 1. Hero Narrative */}
+      <HeroNarrative />
 
-        <MotionContainer direction="up" stagger={0.1} className="relative z-10 space-y-6 max-w-3xl">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full badge-gold text-xs font-semibold">
-            <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-            <span>Valax Scrub Ecosystem Subplatform</span>
+      {/* 2. Product Narrative Pillars */}
+      <section className="space-y-8">
+        <div className="text-center max-w-2xl mx-auto space-y-3">
+          <span className="badge-cyan text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+            Architecture & Philosophy
+          </span>
+          <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
+            Built from the Ground Up for Developer Trust
+          </h2>
+          <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed font-normal">
+            Every layer of Valax BBS & Trade is designed for cryptographic transparency, strict security isolation, and immutable auditability.
+          </p>
+        </div>
+
+        <MotionContainer direction="up" stagger={0.08} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
+            <div className="h-10 w-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <MessageSquare className="h-5 w-5" />
+            </div>
+            <h3 className="text-sm font-bold text-white tracking-tight">Technical BBS Forum</h3>
+            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
+              High-signal RFC discussions, architecture reviews, and developer collaboration with syntax-highlighted code blocks.
+            </p>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
-            Developer Exchange & <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-200 to-amber-500">
-              High-Precision BBS
-            </span>
-          </h1>
+          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
+            <div className="h-10 w-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-glow-cyan">
+              <Code2 className="h-5 w-5" />
+            </div>
+            <h3 className="text-sm font-bold text-white tracking-tight">Verified External Delivery</h3>
+            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
+              Direct binary uploads are permanently blocked. Software packages distribute exclusively through audited GitHub Releases.
+            </p>
+          </div>
 
-          <p className="text-sm sm:text-base text-neutral-300 leading-relaxed font-normal">
-            Zero binary uploads, verified GitHub Release distribution, and an immutable double-entry Valax Utility Credit ledger. Built exclusively for developer tooling and community knowledge sharing.
-          </p>
+          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
+            <div className="h-10 w-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+              <Coins className="h-5 w-5" />
+            </div>
+            <h3 className="text-sm font-bold text-white tracking-tight">Utility Credit Dual Ledger</h3>
+            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
+              Double-entry accounting with LibSQL atomic rollback states, preventing concurrency race conditions or double deductions.
+            </p>
+          </div>
 
-          <div className="flex flex-wrap items-center gap-4 pt-2">
-            <Link
-              href="/bbs"
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-obsidian-950 text-xs font-bold shadow-glow-gold transition-all duration-200 active:scale-95"
-            >
-              <MessageSquare className="h-4 w-4" />
-              <span>Explore BBS Community</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-            <Link
-              href="/market"
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-neutral-200 text-xs font-semibold border border-white/[0.08] hover:border-white/[0.16] transition-all"
-            >
-              <ShoppingBag className="h-4 w-4 text-cyan-400" />
-              <span>Browse Marketplace</span>
-            </Link>
+          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
+            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <KeyRound className="h-5 w-5" />
+            </div>
+            <h3 className="text-sm font-bold text-white tracking-tight">Discord Identity & Session Guard</h3>
+            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
+              Passwordless OAuth authentication with 128-bit publicSessionId isolation for instant multi-device remote revocation.
+            </p>
           </div>
         </MotionContainer>
+      </section>
 
-        {/* Live Metrics Showcase */}
-        <div className="relative z-10 mt-12 grid grid-cols-2 sm:grid-cols-4 gap-4 pt-8 border-t border-white/[0.06]">
-          <div className="p-4 rounded-xl bg-obsidian-900/60 border border-white/[0.04]">
-            <div className="flex items-center gap-2 text-neutral-400 text-xs font-medium mb-1">
-              <Users className="h-3.5 w-3.5 text-cyan-400" />
-              <span>Verified Members</span>
+      {/* 3. Interactive Product Preview Showcase */}
+      <section className="space-y-4">
+        <ProductPreviewShowcase />
+      </section>
+
+      {/* 4. Real Community Discussions */}
+      <section className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-white/[0.06]">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Flame className="h-4 w-4 text-amber-400" />
+              <h2 className="text-lg font-bold text-white tracking-tight">Active Community Discussions</h2>
             </div>
-            <MetricCounter end={Math.max(userCount, 18)} className="text-xl sm:text-2xl font-black text-white" />
+            <p className="text-xs text-neutral-400">Real-time technical threads and developer proposals</p>
           </div>
 
-          <div className="p-4 rounded-xl bg-obsidian-900/60 border border-white/[0.04]">
-            <div className="flex items-center gap-2 text-neutral-400 text-xs font-medium mb-1">
-              <MessageSquare className="h-3.5 w-3.5 text-amber-400" />
-              <span>Discussions</span>
+          <Link
+            href="/bbs"
+            className="text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors"
+          >
+            <span>View All Topics</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+
+        {hotThreads.length === 0 ? (
+          <div className="p-12 text-center rounded-2xl glass-card text-neutral-400 space-y-3">
+            <MessageSquare className="h-8 w-8 text-neutral-600 mx-auto" />
+            <p className="text-xs">No active discussions currently listed. Be the first to start a conversation!</p>
+            <Link
+              href="/bbs/new"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl badge-gold text-xs font-bold"
+            >
+              Start New Thread
+            </Link>
+          </div>
+        ) : (
+          <MotionContainer direction="up" stagger={0.06} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {hotThreads.map((t) => (
+              <Link
+                key={t.id}
+                href={`/bbs/thread/${t.slug}`}
+                className="p-6 rounded-2xl glass-card hover:border-amber-400/40 transition-all group flex flex-col justify-between"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="badge-cyan text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {t.board?.name || "General"}
+                    </span>
+                    <span className="text-[11px] text-neutral-400">
+                      {new Date(t.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </span>
+                  </div>
+                  <h3 className="font-bold text-sm text-neutral-100 group-hover:text-amber-400 transition-colors line-clamp-2">
+                    {t.title}
+                  </h3>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-white/[0.04] flex items-center justify-between text-[11px] text-neutral-400">
+                  <span>Author: <strong className="text-neutral-300 font-semibold">{t.author?.username || "Developer"}</strong></span>
+                  <div className="flex items-center gap-3">
+                    <span>{t.likesCount} Likes</span>
+                    <span>{t.repliesCount} Replies</span>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </MotionContainer>
+        )}
+      </section>
+
+      {/* 5. Verified Digital Releases */}
+      <section className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-white/[0.06]">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="h-4 w-4 text-cyan-400" />
+              <h2 className="text-lg font-bold text-white tracking-tight">Verified Developer Releases</h2>
             </div>
-            <MetricCounter end={Math.max(threadCount, 24)} className="text-xl sm:text-2xl font-black text-white" />
+            <p className="text-xs text-neutral-400">Audited scripts, tooling, and developer templates</p>
           </div>
 
-          <div className="p-4 rounded-xl bg-obsidian-900/60 border border-white/[0.04]">
-            <div className="flex items-center gap-2 text-neutral-400 text-xs font-medium mb-1">
-              <ShoppingBag className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Active Releases</span>
-            </div>
-            <MetricCounter end={Math.max(productCount, 7)} className="text-xl sm:text-2xl font-black text-white" />
+          <Link
+            href="/market"
+            className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+          >
+            <span>Explore Marketplace</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+
+        {featuredProducts.length === 0 ? (
+          <div className="p-12 text-center rounded-2xl glass-card text-neutral-400 space-y-3">
+            <ShoppingBag className="h-8 w-8 text-neutral-600 mx-auto" />
+            <p className="text-xs">No products currently published. Click below to submit an asset for review!</p>
+            <Link
+              href="/market/publish"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl badge-cyan text-xs font-bold"
+            >
+              Publish Developer Asset
+            </Link>
+          </div>
+        ) : (
+          <MotionContainer direction="up" stagger={0.06} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {featuredProducts.map((p) => (
+              <div
+                key={p.id}
+                className="p-6 rounded-2xl glass-card hover:border-cyan-400/40 transition-all flex flex-col justify-between group"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="badge-cyan text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      {p.category}
+                    </span>
+                    <span className="text-[10px] text-neutral-400 font-mono">v{p.version}</span>
+                  </div>
+
+                  <Link href={`/market/${p.slug}`} className="block">
+                    <h3 className="font-bold text-xs sm:text-sm text-neutral-100 group-hover:text-cyan-400 transition-colors line-clamp-2">
+                      {p.title}
+                    </h3>
+                    <p className="text-[11px] text-neutral-400 mt-1 line-clamp-2 font-normal">
+                      {p.shortDescription}
+                    </p>
+                  </Link>
+                </div>
+
+                <div className="mt-5 pt-3 border-t border-white/[0.04] flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 badge-gold px-2.5 py-1 rounded-lg text-xs font-bold">
+                    <Coins className="h-3 w-3 text-amber-400" />
+                    <span>{p.tokenPrice}</span>
+                  </div>
+
+                  <Link
+                    href={`/market/${p.slug}`}
+                    className="text-[11px] text-neutral-400 hover:text-white font-medium flex items-center gap-1"
+                  >
+                    <span>View</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </MotionContainer>
+        )}
+      </section>
+
+      {/* 6. Utility Credits & Governance Policy */}
+      <section className="rounded-3xl border border-white/[0.08] bg-obsidian-950/90 p-8 sm:p-12 space-y-6">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck className="h-5 w-5 text-emerald-400" />
+          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+            Governance & Non-Financial Utility Credits
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-neutral-400 leading-relaxed">
+          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900 border border-white/[0.04]">
+            <h4 className="font-bold text-neutral-200 text-sm">Non-Financial Utility</h4>
+            <p>
+              Valax Credits are internal functional credits designed solely for software licensing, developer tooling access, and forum features. They are not investments, securities, or convertible currency.
+            </p>
           </div>
 
-          <div className="p-4 rounded-xl bg-obsidian-900/60 border border-white/[0.04]">
-            <div className="flex items-center gap-2 text-neutral-400 text-xs font-medium mb-1">
-              <Activity className="h-3.5 w-3.5 text-purple-400" />
-              <span>Audited Entries</span>
-            </div>
-            <MetricCounter end={Math.max(ledgerCount, 15)} className="text-xl sm:text-2xl font-black text-white" />
+          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900 border border-white/[0.04]">
+            <h4 className="font-bold text-neutral-200 text-sm">Strict Zero-Upload Policy</h4>
+            <p>
+              The platform never hosts or serves user binary executables. All distributed assets are verified external GitHub Release tags, safeguarding the ecosystem against untrusted server storage.
+            </p>
+          </div>
+
+          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900 border border-white/[0.04]">
+            <h4 className="font-bold text-neutral-200 text-sm">Fail-Closed Admin Safeguards</h4>
+            <p>
+              High-risk transaction pathways, ledger adjustments, and payments remain strictly guarded by server-side feature flags, defaulting to closed on any database read interruption.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* Feature Pillar Architecture */}
-      <MotionContainer direction="up" stagger={0.08} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-7 rounded-2xl glass-card transition-all duration-300 space-y-4 hover:-translate-y-1">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shadow-glow-cyan">
-            <Code2 className="h-5 w-5" />
-          </div>
-          <h3 className="text-base font-bold text-white tracking-tight">Verified External Delivery</h3>
-          <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-            Direct server executable hosting is strictly prohibited. All distributed assets link to authenticated GitHub Releases with verified checksums.
+      {/* 7. Final Action CTA */}
+      <section className="relative overflow-hidden rounded-3xl border border-amber-500/30 bg-gradient-to-r from-obsidian-900 via-obsidian-950 to-obsidian-900 p-8 sm:p-14 text-center space-y-6 shadow-glow-gold">
+        <div className="max-w-xl mx-auto space-y-3">
+          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
+            Ready to Build with the Valax Ecosystem?
+          </h2>
+          <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed font-normal">
+            Join the developer community, participate in RFC proposals, or browse verified GitHub software releases.
           </p>
         </div>
 
-        <div className="p-7 rounded-2xl glass-card transition-all duration-300 space-y-4 hover:-translate-y-1">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shadow-glow-gold">
-            <Coins className="h-5 w-5" />
-          </div>
-          <h3 className="text-base font-bold text-white tracking-tight">Double-Entry Utility Ledger</h3>
-          <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-            Immutable LibSQL ledger transactions ensure strict financial math invariants, atomic state transitions, and zero duplicate deductions.
-          </p>
+        <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+          <Link
+            href="/login"
+            className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-obsidian-950 text-xs font-black shadow-glow-gold transition-all active:scale-95"
+          >
+            <Lock className="h-4 w-4" />
+            <span>Authenticate via Discord</span>
+          </Link>
+          <Link
+            href="/bbs"
+            className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-neutral-200 text-xs font-bold border border-white/[0.08] hover:border-white/[0.18] transition-all"
+          >
+            <MessageSquare className="h-4 w-4 text-cyan-400" />
+            <span>Join BBS Forum</span>
+          </Link>
+          <Link
+            href="/market"
+            className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-neutral-200 text-xs font-bold border border-white/[0.08] hover:border-white/[0.18] transition-all"
+          >
+            <ShoppingBag className="h-4 w-4 text-emerald-400" />
+            <span>View Marketplace</span>
+          </Link>
         </div>
-
-        <div className="p-7 rounded-2xl glass-card transition-all duration-300 space-y-4 hover:-translate-y-1">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
-          <h3 className="text-base font-bold text-white tracking-tight">Isolated Discord Auth</h3>
-          <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-            Passwordless Discord OAuth with HttpOnly session storage and publicSessionId cryptographic isolation for multi-device revocation.
-          </p>
-        </div>
-      </MotionContainer>
-
-      {/* BBS Community & Marketplace Showcase */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Left: Trending Discussions */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-            <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
-              <Flame className="h-4 w-4 text-amber-400" />
-              <span>Trending Technical Discussions</span>
-            </h2>
-            <Link href="/bbs" className="text-xs text-amber-400 hover:underline font-semibold flex items-center gap-1">
-              View All <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="space-y-3">
-            {hotThreads.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl glass-card text-neutral-400 text-xs">
-                No active discussions yet. Be the first to start a topic in the BBS!
-              </div>
-            ) : (
-              hotThreads.map((t) => (
-                <Link
-                  key={t.id}
-                  href={`/bbs/thread/${t.slug}`}
-                  className="block p-4 rounded-xl glass-card hover:border-amber-400/40 transition-all group"
-                >
-                  <h3 className="font-bold text-xs sm:text-sm text-neutral-200 group-hover:text-amber-400 transition-colors line-clamp-1">
-                    {t.title}
-                  </h3>
-                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-neutral-400">
-                    <span className="flex items-center gap-1.5">
-                      By <span className="font-semibold text-neutral-300">{t.author?.username || "Developer"}</span>
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <span>{t.likesCount} Likes</span>
-                      <span>{t.repliesCount} Replies</span>
-                    </div>
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Right: Featured Marketplace Releases */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-            <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
-              <ShoppingBag className="h-4 w-4 text-cyan-400" />
-              <span>Verified Digital Releases</span>
-            </h2>
-            <Link href="/market" className="text-xs text-cyan-400 hover:underline font-semibold flex items-center gap-1">
-              Explore Market <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="space-y-3">
-            {featuredProducts.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl glass-card text-neutral-400 text-xs">
-                No products published yet.
-              </div>
-            ) : (
-              featuredProducts.map((p) => (
-                <Link
-                  key={p.id}
-                  href={`/market/${p.slug}`}
-                  className="p-4 rounded-xl glass-card hover:border-cyan-400/40 transition-all flex items-center justify-between gap-4 group"
-                >
-                  <div className="min-w-0 space-y-1">
-                    <span className="badge-cyan text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      {p.category}
-                    </span>
-                    <h3 className="font-bold text-xs sm:text-sm text-neutral-200 group-hover:text-cyan-400 transition-colors truncate">
-                      {p.title}
-                    </h3>
-                    <div className="text-[11px] text-neutral-400">By {p.developer?.username || "Verified Dev"}</div>
-                  </div>
-
-                  <div className="shrink-0 text-right space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-amber-400">
-                      <Coins className="h-3.5 w-3.5 text-amber-400" />
-                      <span>{p.tokenPrice}</span>
-                      <span className="text-[10px] opacity-80">Credits</span>
-                    </div>
-                    <div className="text-[10px] text-neutral-400 font-medium">{p.salesCount} delivered</div>
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }
