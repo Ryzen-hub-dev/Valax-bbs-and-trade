@@ -1,16 +1,42 @@
 "use client";
 
 import React, { useState } from "react";
-import { MessageSquare, ShoppingBag, ShieldCheck, Coins, KeyRound, CheckCircle2, Github, Terminal, Copy, Check, ExternalLink, Activity, Radio, AlertTriangle, ArrowRight } from "lucide-react";
+import {
+  MessageSquare,
+  ShoppingBag,
+  ShieldCheck,
+  Coins,
+  KeyRound,
+  CheckCircle2,
+  Github,
+  Terminal,
+  Copy,
+  Check,
+  ExternalLink,
+  Activity,
+  Radio,
+  AlertTriangle,
+  ArrowRight,
+  RefreshCw,
+  Lock,
+} from "lucide-react";
 
 export function ProductStorySection() {
   const [activeThread, setActiveThread] = useState<"rfc" | "oauth">("rfc");
   const [copied, setCopied] = useState(false);
   const [sessionRevoked, setSessionRevoked] = useState(false);
+  const [deliveryStep, setDeliveryStep] = useState<"idle" | "verifying" | "fulfilled">("fulfilled");
 
   const handleCopy = () => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const simulateDelivery = () => {
+    setDeliveryStep("verifying");
+    setTimeout(() => {
+      setDeliveryStep("fulfilled");
+    }, 900);
   };
 
   return (
@@ -18,18 +44,18 @@ export function ProductStorySection() {
       {/* Section Header */}
       <div className="text-center max-w-3xl mx-auto space-y-3">
         <span className="badge-gold text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-          Product Narrative & Architecture
+          Product Architecture & Core Pillars
         </span>
         <h2 className="text-2xl sm:text-4xl font-black tracking-tight text-white">
-          Experience the Four Pillars of Valax
+          Engineered for Precision & Security
         </h2>
         <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed font-normal">
-          Explore interactive previews of the core subsystems that power our developer exchange, security isolation, and immutable ledger.
+          Explore interactive previews of the four core subsystems that power our developer exchange, security isolation, and immutable double-entry ledger.
         </p>
       </div>
 
       <div className="space-y-12">
-        {/* Story 1: BBS Forum */}
+        {/* Pillar 1: High-Signal BBS Forum */}
         <div className="rounded-3xl border border-white/[0.08] bg-obsidian-950/80 p-6 sm:p-10 backdrop-blur-xl shadow-2xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-5 space-y-4">
             <div className="inline-flex items-center gap-2 badge-gold text-[10px] font-bold px-2.5 py-0.5 rounded-full">
@@ -40,7 +66,7 @@ export function ProductStorySection() {
               High-Signal Technical Discussions
             </h3>
             <p className="text-xs text-neutral-400 leading-relaxed">
-              Engineered for developer RFCs, architecture proposals, and collaborative debugging. Markdown rendering with syntax-highlighted code blocks and verified author badges.
+              Designed for developer RFCs, architecture proposals, and collaborative debugging. Clean markdown rendering with syntax-highlighted code blocks and verified author badges.
             </p>
             <div className="flex items-center gap-2 pt-2">
               <button
@@ -68,7 +94,7 @@ export function ProductStorySection() {
                 <span className="badge-cyan text-[9px] font-bold px-2 py-0.5 rounded-full uppercase">
                   {activeThread === "rfc" ? "Architecture RFC" : "Security Spec"}
                 </span>
-                <span className="text-[10px] text-amber-400 font-bold font-mono">Product Preview</span>
+                <span className="text-[10px] text-amber-400 font-bold font-mono">Interactive Live View</span>
               </div>
               <span className="text-[11px] text-neutral-400">By CoreDev • 2h ago</span>
             </div>
@@ -102,24 +128,27 @@ await db.insert(sessions).values({ tokenHash: sessionHash, publicSessionId });`}
           </div>
         </div>
 
-        {/* Story 2: Verified Releases */}
+        {/* Pillar 2: Verified Releases & Automated Delivery */}
         <div className="rounded-3xl border border-white/[0.08] bg-obsidian-950/80 p-6 sm:p-10 backdrop-blur-xl shadow-2xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-5 space-y-4">
             <div className="inline-flex items-center gap-2 badge-cyan text-[10px] font-bold px-2.5 py-0.5 rounded-full">
               <ShoppingBag className="h-3 w-3 text-cyan-400" />
-              <span>Pillar 2 • Verified Releases</span>
+              <span>Pillar 2 • Automated GitHub Delivery</span>
             </div>
             <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               Zero Server-Hosted Executables
             </h3>
             <p className="text-xs text-neutral-400 leading-relaxed">
-              We never host or execute user binary files on server infrastructure. All software distributions link exclusively to authenticated GitHub Release tags with verifiable SHA-256 digests.
+              We never host or execute user binary files on server infrastructure. All software distributions link exclusively to authenticated GitHub Release tags with verified SHA-256 digests and frozen immutable delivery snapshots.
             </p>
-            <div className="p-3.5 rounded-xl bg-obsidian-900 border border-white/[0.04] text-[11px] text-neutral-400 space-y-1">
-              <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                <ShieldCheck className="h-4 w-4" /> 100% External Integrity Policy
-              </div>
-              <p className="text-[10px]">Zero malware hosting risks • Strict rehype sanitizer on all links</p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={simulateDelivery}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-2"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${deliveryStep === "verifying" ? "animate-spin" : ""}`} />
+                <span>Simulate Automated Delivery</span>
+              </button>
             </div>
           </div>
 
@@ -152,11 +181,17 @@ await db.insert(sessions).values({ tokenHash: sessionHash, publicSessionId });`}
                 <span className="text-neutral-400">SHA-256 Digest:</span>
                 <span className="text-neutral-300">e3b0c44298fc1c149afbf4c8996fb92427ae41e4...</span>
               </div>
+              <div className="flex justify-between pt-1 border-t border-white/[0.04]">
+                <span className="text-neutral-400">Delivery State:</span>
+                <span className={`font-bold ${deliveryStep === "verifying" ? "text-amber-400 animate-pulse" : "text-emerald-400"}`}>
+                  {deliveryStep === "verifying" ? "Verifying GitHub Release..." : "Immutable Snapshot Created (Fulfilled)"}
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Story 3: Security Center */}
+        {/* Pillar 3: Security Center & Session Guard */}
         <div className="rounded-3xl border border-white/[0.08] bg-obsidian-950/80 p-6 sm:p-10 backdrop-blur-xl shadow-2xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-5 space-y-4">
             <div className="inline-flex items-center gap-2 badge-emerald text-[10px] font-bold px-2.5 py-0.5 rounded-full">
@@ -212,7 +247,7 @@ await db.insert(sessions).values({ tokenHash: sessionHash, publicSessionId });`}
           </div>
         </div>
 
-        {/* Story 4: Utility Credits */}
+        {/* Pillar 4: Non-Financial Utility Credits */}
         <div className="rounded-3xl border border-white/[0.08] bg-obsidian-950/80 p-6 sm:p-10 backdrop-blur-xl shadow-2xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-5 space-y-4">
             <div className="inline-flex items-center gap-2 badge-gold text-[10px] font-bold px-2.5 py-0.5 rounded-full">
@@ -243,7 +278,7 @@ await db.insert(sessions).values({ tokenHash: sessionHash, publicSessionId });`}
             <div className="p-3 rounded-xl bg-obsidian-950 border border-white/[0.04] font-mono text-[11px] flex items-center justify-between">
               <div>
                 <div className="text-white font-bold">tx_8910_entitlement_purchase</div>
-                <div className="text-[10px] text-neutral-400">Asset: Valax CLI Toolset</div>
+                <div className="text-[10px] text-neutral-400">Asset: Valax CLI Toolset (Fulfilled)</div>
               </div>
               <span className="text-red-400 font-bold">-150 Credits</span>
             </div>
