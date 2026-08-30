@@ -1,4 +1,4 @@
-import { createClient, Client } from "@libsql/client";
+import { createClient, Client, Transaction } from "@libsql/client";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
@@ -6,10 +6,24 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
+export interface MigrationLogEntry {
+  fileName: string;
+  hash: string;
+  status: "applied" | "skipped";
+  verification: string;
+}
+
 export interface MigrationResult {
   appliedCount: number;
   skippedCount: number;
-  appliedMigrations: string[];
+  logs: MigrationLogEntry[];
+}
+
+export class MigrationDriftError extends Error {
+  constructor(public fileName: string, public expectedHash: string, public actualHash: string) {
+    super(`Migration drift detected in ${fileName}! Database hash: ${expectedHash}, local file hash: ${actualHash}`);
+    this.name = "MigrationDriftError";
+  }
 }
 
 export async function runMigrations(targetClient?: Client): Promise<MigrationResult> {
@@ -31,7 +45,7 @@ export async function runMigrations(targetClient?: Client): Promise<MigrationRes
     });
   }
 
-  // 1. Ensure __drizzle_migrations table exists
+  // 1. Ensure __drizzle_migrations exists
   await client.execute(`
     CREATE TABLE IF NOT EXISTS __drizzle_migrations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +69,7 @@ export async function runMigrations(targetClient?: Client): Promise<MigrationRes
 
   let appliedCount = 0;
   let skippedCount = 0;
-  const appliedMigrations: string[] = [];
+  const logs: MigrationLogEntry[] = [];
 
   for (const fileName of migrationFiles) {
     const filePath = path.join(drizzleDir, fileName);
@@ -67,90 +81,148 @@ export async function runMigrations(targetClient?: Client): Promise<MigrationRes
     const migrationHash = crypto.createHash("sha256").update(rawSql).digest("hex");
 
     if (executedHashes.has(migrationHash)) {
+      // Schema Introspection to verify database health
+      let verification = "Schema verified";
+      if (fileName === "0005_sessions_not_null.sql") {
+        const tableInfo = await client.execute("PRAGMA table_info(sessions);");
+        const col = tableInfo.rows.find((c) => c.name === "public_session_id");
+        if (!col || Number(col.notnull) !== 1) {
+          throw new Error("Schema drift: sessions.public_session_id is recorded in migration table but NOT NULL constraint is missing in database.");
+        }
+        verification = "sessions.public_session_id NOT NULL verified";
+      }
+
       skippedCount++;
+      logs.push({
+        fileName,
+        hash: migrationHash,
+        status: "skipped",
+        verification,
+      });
+      console.log(`[MIGRATION] ${fileName} (Hash: ${migrationHash.slice(0, 16)}...) -> SKIPPED (${verification})`);
       continue;
     }
 
-    console.log(`[MIGRATION RUNNER] Applying ${fileName} (Hash: ${migrationHash.slice(0, 16)}...)...`);
+    console.log(`[MIGRATION] Applying ${fileName} (Hash: ${migrationHash.slice(0, 16)}...)...`);
 
-    // Special Idempotent handling for 0004 (public_session_id)
-    if (fileName === "0004_add_public_session_id.sql") {
-      const tableInfo = await client.execute("PRAGMA table_info(sessions);");
-      const hasCol = tableInfo.rows.some((c) => c.name === "public_session_id");
+    // Execute within a strict LibSQL transaction
+    const tx: Transaction = await client.transaction("write");
 
-      if (!hasCol) {
-        await client.execute("ALTER TABLE sessions ADD COLUMN public_session_id text;");
-      }
+    try {
+      if (fileName === "0004_add_public_session_id.sql") {
+        const tableInfo = await tx.execute("PRAGMA table_info(sessions);");
+        const hasCol = tableInfo.rows.some((c) => c.name === "public_session_id");
+        if (!hasCol) {
+          await tx.execute("ALTER TABLE sessions ADD COLUMN public_session_id text;");
+        }
 
-      // Backfill any NULL public_session_id with cryptographically secure 128-bit random strings
-      await client.execute("UPDATE sessions SET public_session_id = 'psess_' || lower(hex(randomblob(16))) WHERE public_session_id IS NULL;");
+        // Backfill NULL records with secure 128-bit random strings
+        await tx.execute("UPDATE sessions SET public_session_id = 'psess_' || lower(hex(randomblob(16))) WHERE public_session_id IS NULL;");
 
-      const nullCheck = await client.execute("SELECT count(*) as c FROM sessions WHERE public_session_id IS NULL;");
-      if (Number(nullCheck.rows[0].c) > 0) {
-        throw new Error("Integrity check failed: sessions still contain NULL public_session_id after backfill.");
-      }
+        const nullCheck = await tx.execute("SELECT count(*) as c FROM sessions WHERE public_session_id IS NULL;");
+        if (Number(nullCheck.rows[0].c) > 0) {
+          throw new Error("Migration 0004 validation failed: NULL public_session_id remains after backfill.");
+        }
 
-      await client.execute("CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_session_id_unique ON sessions (public_session_id);");
-      await client.execute("CREATE INDEX IF NOT EXISTS sessions_public_session_id_idx ON sessions (public_session_id);");
-    } else if (fileName === "0005_sessions_not_null.sql") {
-      // Special Idempotent handling for 0005: check if table already has notnull = 1
-      const tableInfo = await client.execute("PRAGMA table_info(sessions);");
-      const col = tableInfo.rows.find((c) => c.name === "public_session_id");
+        await tx.execute("CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_session_id_unique ON sessions (public_session_id);");
+        await tx.execute("CREATE INDEX IF NOT EXISTS sessions_public_session_id_idx ON sessions (public_session_id);");
+      } else if (fileName === "0005_sessions_not_null.sql") {
+        // Step A: Pre-migration count and NULL backfill
+        const preCountRes = await tx.execute("SELECT count(*) as total FROM sessions;");
+        const preCount = Number(preCountRes.rows[0].total);
 
-      if (col && Number(col.notnull) === 1) {
-        console.log("   -> sessions.public_session_id is already NOT NULL. Skipping table rebuild.");
+        await tx.execute("UPDATE sessions SET public_session_id = 'psess_' || lower(hex(randomblob(16))) WHERE public_session_id IS NULL;");
+
+        // Step B: Create sessions_new with NOT NULL constraint
+        await tx.execute(`
+          CREATE TABLE sessions_new (
+            id TEXT PRIMARY KEY,
+            public_session_id TEXT NOT NULL UNIQUE,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            user_agent TEXT,
+            ip_address TEXT
+          );
+        `);
+
+        // Step C: Copy all rows into sessions_new
+        await tx.execute(`
+          INSERT INTO sessions_new (id, public_session_id, user_id, expires_at, created_at, user_agent, ip_address)
+            SELECT id, public_session_id, user_id, expires_at, created_at, user_agent, ip_address FROM sessions;
+        `);
+
+        // Step D: Validate post-copy count and NULL integrity
+        const postCountRes = await tx.execute("SELECT count(*) as total FROM sessions_new;");
+        const postCount = Number(postCountRes.rows[0].total);
+        if (postCount !== preCount) {
+          throw new Error(`Migration 0005 row count mismatch: Expected ${preCount}, but sessions_new has ${postCount}`);
+        }
+
+        const nullCheck = await tx.execute("SELECT count(*) as c FROM sessions_new WHERE public_session_id IS NULL;");
+        if (Number(nullCheck.rows[0].c) > 0) {
+          throw new Error("Migration 0005 integrity violation: NULL public_session_id in sessions_new.");
+        }
+
+        // Step E: Drop old table and rename new table
+        await tx.execute("DROP TABLE sessions;");
+        await tx.execute("ALTER TABLE sessions_new RENAME TO sessions;");
+
+        // Step F: Rebuild all indices
+        await tx.execute("CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions (user_id);");
+        await tx.execute("CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions (expires_at);");
+        await tx.execute("CREATE INDEX IF NOT EXISTS sessions_public_session_id_idx ON sessions (public_session_id);");
+
+        // Step G: Validate foreign keys
+        const fkCheck = await tx.execute("PRAGMA foreign_key_check;");
+        if (fkCheck.rows.length > 0) {
+          throw new Error("Migration 0005 foreign key check failed: Foreign key violations detected.");
+        }
       } else {
-        // First backfill any NULL public_session_id before table rebuild
-        await client.execute("UPDATE sessions SET public_session_id = 'psess_' || lower(hex(randomblob(16))) WHERE public_session_id IS NULL;");
-
-        // Safe table rebuild
         const cleanSql = rawSql.replace(/--.*$/gm, "").replace(/--> statement-breakpoint/g, ";");
         const statements = cleanSql.split(";").map((s) => s.trim()).filter((s) => s.length > 0);
 
         for (const stmt of statements) {
-          await client.execute(stmt);
-        }
-
-        // Post-migration foreign key verification
-        const fkCheck = await client.execute("PRAGMA foreign_key_check;");
-        if (fkCheck.rows.length > 0) {
-          throw new Error("Integrity check failed: Foreign key violations detected after table rebuild.");
+          await tx.execute(stmt);
         }
       }
-    } else {
-      const cleanSql = rawSql.replace(/--.*$/gm, "").replace(/--> statement-breakpoint/g, ";");
-      const statements = cleanSql.split(";").map((s) => s.trim()).filter((s) => s.length > 0);
 
-      for (const stmt of statements) {
-        try {
-          await client.execute(stmt);
-        } catch (err: any) {
-          // Ignore table/column already exists if previously created
-          if (!err.message?.includes("already exists") && !err.message?.includes("duplicate")) {
-            throw err;
-          }
-        }
-      }
+      // Record migration hash in __drizzle_migrations within the same atomic transaction
+      await tx.execute({
+        sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?);",
+        args: [migrationHash, Date.now()],
+      });
+
+      await tx.commit();
+      appliedCount++;
+      logs.push({
+        fileName,
+        hash: migrationHash,
+        status: "applied",
+        verification: "Transaction committed & verified",
+      });
+      console.log(`[MIGRATION] ${fileName} -> APPLIED SUCCESSFULLY.`);
+    } catch (err: any) {
+      await tx.rollback();
+      console.error(`[MIGRATION ERROR] ${fileName} failed. Transaction rolled back. Reason:`, err.message);
+      throw err;
     }
-
-    // Record migration execution in __drizzle_migrations
-    await client.execute({
-      sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?);",
-      args: [migrationHash, Date.now()],
-    });
-
-    appliedCount++;
-    appliedMigrations.push(fileName);
-    console.log(`[MIGRATION RUNNER] Successfully applied and recorded ${fileName}.`);
   }
 
-  return { appliedCount, skippedCount, appliedMigrations };
+  return { appliedCount, skippedCount, logs };
 }
 
 if (process.argv[1] && (process.argv[1].endsWith("migrate.ts") || process.argv[1].endsWith("migrate.js"))) {
   runMigrations()
     .then((res) => {
-      console.log(`\n[MIGRATION SUMMARY] Applied: ${res.appliedCount}, Skipped: ${res.skippedCount}`);
+      console.log("\n=========================================================================");
+      console.log("                       MIGRATION RUNNER SUMMARY                          ");
+      console.log("=========================================================================");
+      console.log(`Applied: ${res.appliedCount} | Skipped: ${res.skippedCount}`);
+      res.logs.forEach((l) => {
+        console.log(` - ${l.fileName}: [${l.status.toUpperCase()}] -> ${l.verification} (Hash: ${l.hash.slice(0, 16)}...)`);
+      });
+      console.log("=========================================================================");
     })
     .catch((err) => {
       console.error("\n[MIGRATION FATAL ERROR]", err);

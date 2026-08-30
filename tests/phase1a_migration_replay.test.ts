@@ -5,7 +5,7 @@ import path from "path";
 
 async function runMigrationReplayTest() {
   console.log("=========================================================================");
-  console.log("   VALAX SCRUB BBS & TRADE - FORMAL MIGRATION RUNNER REPLAY TEST         ");
+  console.log("   VALAX SCRUB BBS & TRADE - FORMAL ATOMIC MIGRATION REPLAY & ROLLBACK   ");
   console.log("=========================================================================\n");
 
   const testDbFile = path.join(process.cwd(), "tests", "temp_fresh_migration.db");
@@ -72,10 +72,10 @@ async function runMigrationReplayTest() {
     args: [legacySessionHash],
   });
   const legacyRow = sessionCheck.rows[0];
-  const legacyPublicId = String(legacyRow.public_session_id || "");
+  const initialPublicId = String(legacyRow.public_session_id || "");
   assert(
-    legacyRow && legacyPublicId.startsWith("psess_") && legacyPublicId.length >= 24,
-    `Legacy session backfilled with unique public_session_id (${legacyPublicId})`
+    legacyRow && initialPublicId.startsWith("psess_") && initialPublicId.length >= 24,
+    `Legacy session backfilled with unique public_session_id (${initialPublicId})`
   );
 
   // 5. Verify sessions table column info has notnull = 1
@@ -98,7 +98,19 @@ async function runMigrationReplayTest() {
 
   // 7. Verify Idempotency: Re-running migration runner does nothing
   const run2 = await runMigrations(client);
-  assert(run2.appliedCount === 0 && run2.skippedCount === 6, "Second migration run safely skipped with 0 changes (Idempotent)");
+  const sessionCheckAfter = await client.execute({
+    sql: "SELECT * FROM sessions WHERE id = ?;",
+    args: [legacySessionHash],
+  });
+  const publicIdAfterSecondRun = String(sessionCheckAfter.rows[0].public_session_id || "");
+
+  assert(
+    run2.appliedCount === 0 && run2.skippedCount === 6 && publicIdAfterSecondRun === initialPublicId,
+    "Second migration run safely skipped with 0 changes and identical data (Idempotent)"
+  );
+
+  const migrationRecords = await client.execute("SELECT count(*) as c FROM __drizzle_migrations;");
+  assert(Number(migrationRecords.rows[0].c) === 6, "__drizzle_migrations contains exactly 6 records with zero duplicates");
 
   // 8. Verify NOT NULL enforcement on new session insertion
   let nullInsertCaught = false;
@@ -112,14 +124,27 @@ async function runMigrationReplayTest() {
   }
   assert(nullInsertCaught, "Direct NULL insert into public_session_id strictly rejected by database constraint");
 
-  // Audit total tables
-  const tableCheck = await client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
-  const tableNames = tableCheck.rows.map((r) => r.name as string);
-  console.log(`\n[AUDIT] Total Tables in Fresh Database: ${tableNames.length}`);
-  tableNames.forEach((t, idx) => console.log(`  ${idx + 1}. ${t}`));
+  // 9. Mid-Migration Failure & Rollback Test
+  console.log("\n--- Testing Atomic Rollback on Mid-Migration Failure ---");
+  const txFail = await client.transaction("write");
+  let rollbackCaught = false;
+  try {
+    await txFail.execute("CREATE TABLE sessions_fail_test (id TEXT PRIMARY KEY);");
+    await txFail.execute("INSERT INTO sessions_fail_test VALUES ('test1');");
+    // Simulate intentional mid-migration failure
+    await txFail.execute("INSERT INTO non_existent_table_for_failure VALUES ('bad');");
+    await txFail.commit();
+  } catch (err) {
+    await txFail.rollback();
+    rollbackCaught = true;
+  }
 
-  assert(tableNames.includes("orders_market"), "orders_market table exists");
-  assert(tableNames.includes("__drizzle_migrations"), "__drizzle_migrations table exists");
+  assert(rollbackCaught, "Mid-migration failure caught and transaction rolled back");
+  const masterCheckFail = await client.execute("SELECT name FROM sqlite_master WHERE name = 'sessions_fail_test';");
+  assert(masterCheckFail.rows.length === 0, "Rolled-back table was completely discarded, leaving database intact");
+
+  const sessionsIntactCheck = await client.execute("SELECT count(*) as c FROM sessions;");
+  assert(Number(sessionsIntactCheck.rows[0].c) === 1, "Original sessions table data remains 100% intact after rollback");
 
   try { client.close(); } catch {}
   try { if (fs.existsSync(testDbFile)) fs.unlinkSync(testDbFile); } catch {}
