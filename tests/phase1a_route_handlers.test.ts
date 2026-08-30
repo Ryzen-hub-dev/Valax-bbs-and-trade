@@ -1,11 +1,11 @@
-import { runMigrations } from "@/db/migrate";
-import { setFeatureFlag } from "@/lib/flags";
 // Set isolated test environment flags BEFORE importing modules
 (process.env as any).NODE_ENV = "test";
 process.env.IS_TEST = "true";
 process.env.TURSO_TEST_DATABASE_URL = "file:tests/temp_phase1a_sandbox.db";
 delete process.env.TURSO_TEST_AUTH_TOKEN;
 
+import { runMigrations } from "@/db/migrate";
+import { setFeatureFlag } from "@/lib/flags";
 import { POST as purchaseRoute } from "@/app/api/market/purchase/route";
 import { POST as adminLedgerRoute } from "@/app/api/admin/ledger/route";
 import { POST as marketProductsRoute } from "@/app/api/market/products/route";
@@ -35,28 +35,7 @@ async function runRealRouteHandlersSuite() {
   }
 
   // Initialize fresh test schema tables in isolated SQLite database
-  const ddlPath0 = path.join(process.cwd(), "drizzle", "0000_init_schema.sql");
-  const ddlPath1 = path.join(process.cwd(), "drizzle", "0001_add_tags_and_notifications.sql");
-  const ddlPath2 = path.join(process.cwd(), "drizzle", "0002_idempotency_and_ratelimit.sql");
-  const ddlPath3 = path.join(process.cwd(), "drizzle", "0003_market_orders_state_machine.sql");
-
-  const ddlPath4 = path.join(process.cwd(), "drizzle", "0004_add_public_session_id.sql");
-  const migrations = [ddlPath0, ddlPath1, ddlPath2, ddlPath3, ddlPath4];
-  for (const mPath of migrations) {
-    if (fs.existsSync(mPath)) {
-      const rawSql = fs.readFileSync(mPath, "utf-8");
-      const cleanSql = rawSql.replace(/--.*$/gm, "").replace(/--> statement-breakpoint/g, ";");
-      const statements = cleanSql.split(";").map((s) => s.trim()).filter((s) => s.length > 0);
-      for (const stmt of statements) {
-        try {
-          await client.execute(stmt);
-        } catch (e: any) {}
-      }
-    }
-  }
-
-  try { await client.execute("ALTER TABLE users ADD COLUMN deleted_at INTEGER;"); } catch {}
-  try { await client.execute("ALTER TABLE product_purchases ADD COLUMN revoked_at INTEGER;"); } catch {}
+  await runMigrations(client);
 
   let passed = 0;
   let failed = 0;
@@ -70,8 +49,6 @@ async function runRealRouteHandlersSuite() {
       failed++;
     }
   }
-
-
 
   // 1. Setup Test Users and Sessions in Database
   const testBuyerId = `test_buyer_${nanoid(8)}`;
@@ -118,6 +95,12 @@ async function runRealRouteHandlersSuite() {
       description: "Comprehensive active digital asset description.",
       category: "Scripts",
       tokenPrice: 150,
+      version: "1.0.0",
+      releaseVersion: "1.0.0",
+      releaseTag: "v1.0.0",
+      repositoryUrl: "https://github.com/valax/script",
+      releaseUrl: "https://github.com/valax/script/releases/tag/v1.0.0",
+      verificationStatus: "verified",
       githubReleaseUrl: "https://github.com/valax/script/releases/tag/v1.0.0",
       status: "active",
       moderationStatus: "approved",
@@ -131,6 +114,12 @@ async function runRealRouteHandlersSuite() {
       description: "Pending moderation asset description.",
       category: "Scripts",
       tokenPrice: 100,
+      version: "1.0.0",
+      releaseVersion: "1.0.0",
+      releaseTag: "v1.0.0",
+      repositoryUrl: "https://github.com/valax/script-pending",
+      releaseUrl: "https://github.com/valax/script-pending/releases/tag/v1.0.0",
+      verificationStatus: "unverified",
       githubReleaseUrl: "https://github.com/valax/script-pending/releases/tag/v1.0.0",
       status: "draft",
       moderationStatus: "pending",
@@ -144,6 +133,12 @@ async function runRealRouteHandlersSuite() {
       description: "Another active digital asset description.",
       category: "Scripts",
       tokenPrice: 200,
+      version: "2.0.0",
+      releaseVersion: "2.0.0",
+      releaseTag: "v2.0.0",
+      repositoryUrl: "https://github.com/valax/script-second",
+      releaseUrl: "https://github.com/valax/script-second/releases/tag/v2.0.0",
+      verificationStatus: "verified",
       githubReleaseUrl: "https://github.com/valax/script-second/releases/tag/v2.0.0",
       status: "active",
       moderationStatus: "approved",
@@ -230,7 +225,7 @@ async function runRealRouteHandlersSuite() {
   const res4 = await purchaseRoute(req4);
   assert(res4.status === 404, "Draft/Pending product returns HTTP 404 Not Found");
 
-  // Enable MARKET_PURCHASE_ENABLED for purchase test`n  `n  await setFeatureFlag("MARKET_PURCHASE_ENABLED", true, testAdminId);`n`n  // TEST 5: Successful Purchase Flow -> 200
+  // TEST 5: Successful Purchase Flow -> 200
   console.log("\n--- 5. Testing Real POST /api/market/purchase Success ---");
   const validPurchaseKey = `idemp_purchase_real_${nanoid(8)}`;
   const req5 = makeReq("/api/market/purchase", {

@@ -21,6 +21,7 @@ const testSuites = [
   "tests/phase1a_migration_replay.test.ts",
   "tests/phase1a_route_handlers.test.ts",
   "tests/phase1b_auth_rbac.test.ts",
+  "tests/phase1d_marketplace_delivery.test.ts",
 ];
 
 let allPassed = true;
@@ -63,7 +64,7 @@ if (!allPassed) {
   process.exit(1);
 } else {
   console.log("\n=========================================================================");
-  console.log("   ALL 4 TEST SUITES EXECUTED SUCCESSFULLY WITH ZERO FAILURES           ");
+  console.log("   ALL 5 TEST SUITES EXECUTED SUCCESSFULLY WITH ZERO FAILURES           ");
   console.log("=========================================================================");
   process.exit(0);
 }

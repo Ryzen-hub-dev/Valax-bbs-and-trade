@@ -105,12 +105,12 @@ async function runMigrationReplayTest() {
   const publicIdAfterSecondRun = String(sessionCheckAfter.rows[0].public_session_id || "");
 
   assert(
-    run2.appliedCount === 0 && run2.skippedCount === 6 && publicIdAfterSecondRun === initialPublicId,
+    run2.appliedCount === 0 && run2.skippedCount === 7 && publicIdAfterSecondRun === initialPublicId,
     "Second migration run safely skipped with 0 changes and identical data (Idempotent)"
   );
 
   const migrationRecords = await client.execute("SELECT count(*) as c FROM __drizzle_migrations;");
-  assert(Number(migrationRecords.rows[0].c) === 6, "__drizzle_migrations contains exactly 6 records with zero duplicates");
+  assert(Number(migrationRecords.rows[0].c) === 7, "__drizzle_migrations contains exactly 7 records with zero duplicates");
 
   // 8. Verify NOT NULL enforcement on new session insertion
   let nullInsertCaught = false;
@@ -146,14 +146,12 @@ async function runMigrationReplayTest() {
   const sessionsIntactCheck = await client.execute("SELECT count(*) as c FROM sessions;");
   assert(Number(sessionsIntactCheck.rows[0].c) === 1, "Original sessions table data remains 100% intact after rollback");
 
-  try { client.close(); } catch {}
-  try { if (fs.existsSync(testDbFile)) fs.unlinkSync(testDbFile); } catch {}
-
   console.log("\n=========================================================================");
   console.log(`MIGRATION TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
   console.log("=========================================================================");
 
   if (failed > 0) process.exit(1);
+  process.exit(0);
 }
 
 runMigrationReplayTest().catch((err) => {

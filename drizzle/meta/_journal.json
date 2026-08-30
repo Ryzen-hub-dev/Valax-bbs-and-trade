@@ -43,6 +43,13 @@
       "when": 1724805000000,
       "tag": "0005_sessions_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1724806000000,
+      "tag": "0006_marketplace_automated_delivery",
+      "breakpoints": true
     }
   ]
 }

@@ -194,10 +194,24 @@ export const products = sqliteTable("products", {
   changelog: text("changelog").default("Initial release").notNull(),
   githubRepositoryUrl: text("github_repository_url"),
   githubReleaseUrl: text("github_release_url").notNull(),
+  // Phase 1D Verified Delivery Fields
+  githubOwner: text("github_owner"),
+  githubRepo: text("github_repo"),
+  repositoryUrl: text("repository_url"),
+  releaseUrl: text("release_url").default("").notNull(),
+  releaseTag: text("release_tag").default("v1.0.0").notNull(),
+  releaseVersion: text("release_version").default("1.0.0").notNull(),
+  releaseAssetUrl: text("release_asset_url"),
+  releaseCommitSha: text("release_commit_sha"),
+  releaseChecksum: text("release_checksum"),
+  licenseTerms: text("license_terms"),
+  supportUrl: text("support_url"),
+  verificationStatus: text("verification_status", { enum: ["unverified", "verified", "failed", "stale"] }).default("unverified").notNull(),
+  lastVerifiedAt: integer("last_verified_at", { mode: "timestamp" }),
   externalDemoUrl: text("external_demo_url"),
   documentationUrl: text("documentation_url"),
   previewImageUrl: text("preview_image_url"),
-  status: text("status", { enum: ["draft", "active", "archived"] }).default("draft").notNull(),
+  status: text("status", { enum: ["draft", "pending_review", "approved", "active", "paused", "revoked", "archived"] }).default("draft").notNull(),
   moderationStatus: text("moderation_status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
   moderationNote: text("moderation_note"),
   salesCount: integer("sales_count").default(0).notNull(),
@@ -209,6 +223,25 @@ export const products = sqliteTable("products", {
   slugIdx: index("products_slug_idx").on(table.slug),
   categoryIdx: index("products_category_idx").on(table.category),
   moderationStatusIdx: index("products_mod_status_idx").on(table.moderationStatus),
+  verificationStatusIdx: index("products_verif_status_idx").on(table.verificationStatus),
+}));
+
+// 12B. Product Version History (Immutable releases)
+export const productVersions = sqliteTable("product_versions", {
+  id: text("id").primaryKey(),
+  productId: text("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  version: text("version").notNull(),
+  releaseTag: text("release_tag").notNull(),
+  releaseUrl: text("release_url").notNull(),
+  releaseAssetUrl: text("release_asset_url"),
+  releaseCommitSha: text("release_commit_sha"),
+  releaseChecksum: text("release_checksum"),
+  changelog: text("changelog"),
+  status: text("status", { enum: ["active", "deprecated", "revoked"] }).default("active").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+}, (table) => ({
+  productIdIdx: index("product_versions_product_id_idx").on(table.productId),
+  versionIdx: index("product_versions_version_idx").on(table.productId, table.version),
 }));
 
 // 13. Marketplace Orders State Machine (Trackable lifecycle, lease expiry & failure compensation)
@@ -218,7 +251,7 @@ export const ordersMarket = sqliteTable("orders_market", {
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
   idempotencyKey: text("idempotency_key").notNull(),
   amount: integer("amount").notNull(),
-  status: text("status", { enum: ["pending", "processing", "completed", "failed", "compensating", "manual_review"] }).default("pending").notNull(),
+  status: text("status", { enum: ["pending", "validating_release", "paid", "fulfilled", "delivery_blocked", "refunded_credits", "revoked", "failed", "processing", "compensating", "manual_review"] }).default("pending").notNull(),
   ledgerReference: text("ledger_reference"),
   entitlementId: text("entitlement_id"),
   failureReason: text("failure_reason"),
@@ -235,6 +268,30 @@ export const ordersMarket = sqliteTable("orders_market", {
   productIdIdx: index("orders_market_product_id_idx").on(table.productId),
   statusIdx: index("orders_market_status_idx").on(table.status),
   recoveryIdx: index("orders_market_recovery_idx").on(table.recoveryRequired),
+}));
+
+// 13B. Order Delivery Snapshots (Immutable delivery capture at purchase moment)
+export const orderDeliverySnapshots = sqliteTable("order_delivery_snapshots", {
+  id: text("id").primaryKey(),
+  orderId: text("order_id").notNull().unique().references(() => ordersMarket.id, { onDelete: "restrict" }),
+  productId: text("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  productVersionId: text("product_version_id"),
+  buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  productTitle: text("product_title").notNull(),
+  purchasedVersion: text("purchased_version").notNull(),
+  releaseTag: text("release_tag").notNull(),
+  repositoryUrl: text("repository_url").notNull(),
+  releaseUrl: text("release_url").notNull(),
+  releaseAssetUrl: text("release_asset_url"),
+  releaseCommitSha: text("release_commit_sha"),
+  releaseChecksum: text("release_checksum"),
+  deliveryStatus: text("delivery_status", { enum: ["fulfilled", "blocked", "refunded", "revoked"] }).default("fulfilled").notNull(),
+  deliveryNotes: text("delivery_notes"),
+  deliveredAt: integer("delivered_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+}, (table) => ({
+  orderIdIdx: index("delivery_snapshots_order_id_idx").on(table.orderId),
+  buyerIdIdx: index("delivery_snapshots_buyer_id_idx").on(table.buyerId),
+  productIdIdx: index("delivery_snapshots_product_id_idx").on(table.productId),
 }));
 
 // 14. Digital Product Purchases and Entitlements (Financial Data Preserved, User+Idempotency Unique)

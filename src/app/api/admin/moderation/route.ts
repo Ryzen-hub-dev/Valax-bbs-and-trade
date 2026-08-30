@@ -1,9 +1,10 @@
 import { db } from "@/db";
-import { reports, forumThreads, products, auditLogs, users } from "@/db/schema";
+import { reports, forumThreads, products, auditLogs, users, productVersions } from "@/db/schema";
 import { requirePermission, requireModerator } from "@/lib/rbac";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError, generateRequestId } from "@/lib/errors";
 import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
+import { verifyGitHubRelease } from "@/lib/github-validator";
 import { eq, desc, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
@@ -13,7 +14,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const modActionSchema = z.object({
-  type: z.enum(["resolve_report", "delete_thread", "pin_thread", "approve_product", "reject_product"]),
+  type: z.enum([
+    "resolve_report",
+    "delete_thread",
+    "pin_thread",
+    "approve_product",
+    "reject_product",
+    "pause_product",
+    "reverify_product",
+    "revoke_product",
+    "archive_product",
+  ]),
   targetId: z.string().min(1),
   note: z.string().max(500).optional(),
 });
@@ -29,16 +40,34 @@ export async function GET(req: NextRequest) {
       .orderBy(desc(reports.createdAt))
       .limit(50);
 
-    const pendingProducts = await db
-      .select()
+    const allProducts = await db
+      .select({
+        id: products.id,
+        title: products.title,
+        slug: products.slug,
+        category: products.category,
+        tokenPrice: products.tokenPrice,
+        version: products.releaseVersion,
+        releaseTag: products.releaseTag,
+        repositoryUrl: products.repositoryUrl,
+        releaseUrl: products.releaseUrl,
+        releaseChecksum: products.releaseChecksum,
+        verificationStatus: products.verificationStatus,
+        lastVerifiedAt: products.lastVerifiedAt,
+        status: products.status,
+        moderationStatus: products.moderationStatus,
+        salesCount: products.salesCount,
+        developerId: products.developerId,
+        createdAt: products.createdAt,
+      })
       .from(products)
-      .where(eq(products.moderationStatus, "pending"))
       .orderBy(desc(products.createdAt))
       .limit(50);
 
     return NextResponse.json({
       reports: pendingReports,
-      pendingProducts,
+      pendingProducts: allProducts.filter((p) => p.moderationStatus === "pending"),
+      allProducts,
     });
   } catch (err: any) {
     return handleApiError(err, { publicMessage: "Failed to load moderation queue.", route: "/api/admin/moderation" });
@@ -59,7 +88,14 @@ export async function POST(req: NextRequest) {
 
     if (type === "resolve_report") {
       modUser = await requirePermission("forum.report.review", req);
-    } else if (type === "approve_product" || type === "reject_product") {
+    } else if (
+      type === "approve_product" ||
+      type === "reject_product" ||
+      type === "pause_product" ||
+      type === "reverify_product" ||
+      type === "revoke_product" ||
+      type === "archive_product"
+    ) {
       modUser = await requirePermission("product.review", req);
     } else {
       modUser = await requirePermission("forum.thread.moderate", req);
@@ -90,9 +126,31 @@ export async function POST(req: NextRequest) {
         await db.update(forumThreads).set({ isPinned: !thread.isPinned }).where(eq(forumThreads.id, targetId));
       }
     } else if (type === "approve_product") {
-      await db.update(products).set({ moderationStatus: "approved", status: "active" }).where(eq(products.id, targetId));
+      await db.update(products).set({ moderationStatus: "approved", status: "active", updatedAt: new Date() }).where(eq(products.id, targetId));
     } else if (type === "reject_product") {
-      await db.update(products).set({ moderationStatus: "rejected", moderationNote: note }).where(eq(products.id, targetId));
+      await db.update(products).set({ moderationStatus: "rejected", status: "draft", moderationNote: note, updatedAt: new Date() }).where(eq(products.id, targetId));
+    } else if (type === "pause_product") {
+      await db.update(products).set({ status: "paused", moderationNote: note, updatedAt: new Date() }).where(eq(products.id, targetId));
+    } else if (type === "revoke_product") {
+      await db.update(products).set({ status: "revoked", moderationNote: note, updatedAt: new Date() }).where(eq(products.id, targetId));
+    } else if (type === "archive_product") {
+      await db.update(products).set({ status: "archived", updatedAt: new Date() }).where(eq(products.id, targetId));
+    } else if (type === "reverify_product") {
+      const prod = (await db.select().from(products).where(eq(products.id, targetId)).limit(1))[0];
+      if (prod) {
+        const check = await verifyGitHubRelease({
+          repositoryUrl: prod.repositoryUrl || prod.githubRepositoryUrl || "",
+          releaseUrl: prod.releaseUrl || prod.githubReleaseUrl,
+          releaseTag: prod.releaseTag || `v${prod.version}`,
+        });
+
+        await db.update(products).set({
+          verificationStatus: check.isValid ? "verified" : "failed",
+          status: check.isValid ? prod.status : "paused",
+          lastVerifiedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(products.id, targetId));
+      }
     }
 
     await db.insert(auditLogs).values({

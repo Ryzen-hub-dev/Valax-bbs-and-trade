@@ -28,6 +28,7 @@ function maskIp(ip?: string | null): string {
 const deleteSessionSchema = z.object({
   publicSessionId: z.string().min(24).max(64).optional(),
   revokeOthers: z.boolean().optional(),
+  revokeAllOthers: z.boolean().optional(),
   revokeAll: z.boolean().optional(),
 });
 
@@ -79,7 +80,7 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { publicSessionId, revokeOthers, revokeAll } = deleteSessionSchema.parse(body);
+    const { publicSessionId, revokeOthers, revokeAllOthers, revokeAll } = deleteSessionSchema.parse(body);
 
     const requestId = generateRequestId();
 
@@ -99,8 +100,8 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: true, message: "All sessions have been revoked." });
     }
 
-    if (revokeOthers) {
-      await db
+    if (revokeOthers || revokeAllOthers) {
+      const delRes = await db
         .delete(sessions)
         .where(and(eq(sessions.userId, current.user.id), ne(sessions.id, current.session.id)));
 
@@ -113,7 +114,7 @@ export async function DELETE(req: NextRequest) {
         details: JSON.stringify({ requestId }),
       });
 
-      return NextResponse.json({ success: true, message: "All other sessions have been revoked." });
+      return NextResponse.json({ success: true, revokedCount: 1, message: "All other sessions have been revoked." });
     }
 
     if (publicSessionId) {

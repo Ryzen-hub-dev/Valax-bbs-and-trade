@@ -1,11 +1,12 @@
 import { requireFeatureFlag } from "@/lib/flags";
 import { db } from "@/db";
-import { products, productPurchases, ordersMarket, walletLedger, auditLogs } from "@/db/schema";
+import { products, productPurchases, ordersMarket, walletLedger, auditLogs, orderDeliverySnapshots } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
 import { getUserWallet, executeLedgerTransaction } from "@/lib/ledger";
 import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError } from "@/lib/errors";
+import { verifyGitHubRelease } from "@/lib/github-validator";
 import { eq, and, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
@@ -22,20 +23,22 @@ const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_-]{8,128}$/;
 const LEASE_DURATION_MS = 30000; // 30 seconds processing lease
 
 export async function POST(req: NextRequest) {
-  // 1. Authenticate Session
+  // 1. Feature Flag Guard
   await requireFeatureFlag("MARKET_PURCHASE_ENABLED");
-    const session = await getCurrentSession(req);
+
+  // 2. Authenticate Session
+  const session = await getCurrentSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }
 
-  // 2. Strict CSRF & Origin Validation
+  // 3. Strict CSRF & Origin Validation
   const csrf = validateCsrfOrigin(req);
   if (!csrf.isValid) {
     return csrf.errorResponse!;
   }
 
-  // 3. Distributed Rate Limiting (Fail-closed on financial mutations)
+  // 4. Distributed Rate Limiting (Fail-closed on financial mutations)
   const clientIp = getClientIp(req);
   const rateKey = `purchase:${session.user.id}:${clientIp}`;
   const rate = await checkRateLimitAsync(rateKey, { maxRequests: 10, windowSeconds: 60, failClosed: true });
@@ -46,7 +49,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4. Strict Mandatory Idempotency-Key Header Enforcement
+  // 5. Strict Mandatory Idempotency-Key Header Enforcement
   const rawIdempotencyKey = req.headers.get("Idempotency-Key")?.trim();
   if (!rawIdempotencyKey) {
     return NextResponse.json(
@@ -63,7 +66,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 5. Payload Size Validation (< 10KB)
+    // 6. Payload Size Validation (< 10KB)
     const rawBodyText = await req.text();
     if (rawBodyText.length > 10240) {
       return NextResponse.json({ error: "Request payload too large." }, { status: 413 });
@@ -74,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     const now = Date.now();
 
-    // 6. Check Order State Machine by (buyerId, idempotencyKey)
+    // 7. Check Order State Machine by (buyerId, idempotencyKey)
     const existingOrder = (
       await db
         .select()
@@ -99,7 +102,15 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (existingOrder.status === "completed" && existingOrder.entitlementId) {
+      if (existingOrder.status === "fulfilled" && existingOrder.entitlementId) {
+        const dsnap = (
+          await db
+            .select()
+            .from(orderDeliverySnapshots)
+            .where(eq(orderDeliverySnapshots.orderId, existingOrder.id))
+            .limit(1)
+        )[0];
+
         const prod = (
           await db.select().from(products).where(eq(products.id, existingOrder.productId)).limit(1)
         )[0];
@@ -108,12 +119,16 @@ export async function POST(req: NextRequest) {
           success: true,
           isIdempotentReplay: true,
           entitlementId: existingOrder.entitlementId,
-          githubReleaseUrl: prod?.githubReleaseUrl || "",
+          orderId: existingOrder.id,
+          purchasedVersion: dsnap?.purchasedVersion || prod?.version || "1.0.0",
+          releaseUrl: dsnap?.releaseUrl || prod?.releaseUrl || prod?.githubReleaseUrl || "",
+          releaseTag: dsnap?.releaseTag || prod?.releaseTag || "v1.0.0",
+          releaseChecksum: dsnap?.releaseChecksum || prod?.releaseChecksum || null,
           message: "Previous transaction confirmed. No additional credits deducted.",
         });
       }
 
-      if (existingOrder.status === "failed") {
+      if (existingOrder.status === "failed" || existingOrder.status === "refunded_credits") {
         return NextResponse.json(
           { error: `Previous purchase attempt failed: ${existingOrder.failureReason || "Transaction rejected"}` },
           { status: 409 }
@@ -127,7 +142,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (existingOrder.status === "processing") {
+      if (existingOrder.status === "processing" || existingOrder.status === "validating_release") {
         const isLeaseActive = existingOrder.leaseExpiresAt && existingOrder.leaseExpiresAt.getTime() > now;
         if (isLeaseActive) {
           return NextResponse.json(
@@ -153,9 +168,8 @@ export async function POST(req: NextRequest) {
         )[0];
 
         if (existingLedger && existingEntitlement) {
-          // Reconcile -> Completed
           await db.update(ordersMarket).set({
-            status: "completed",
+            status: "fulfilled",
             entitlementId: existingEntitlement.id,
             ledgerReference: ledgerKey,
             updatedAt: new Date(),
@@ -166,7 +180,8 @@ export async function POST(req: NextRequest) {
             success: true,
             isIdempotentReplay: true,
             entitlementId: existingEntitlement.id,
-            githubReleaseUrl: prod?.githubReleaseUrl || "",
+            orderId: existingOrder.id,
+            releaseUrl: prod?.releaseUrl || prod?.githubReleaseUrl || "",
             message: "Transaction recovered and confirmed.",
           });
         } else if (existingLedger && !existingEntitlement) {
@@ -183,7 +198,7 @@ export async function POST(req: NextRequest) {
 
           if (refundRes.success) {
             await db.update(ordersMarket).set({
-              status: "failed",
+              status: "refunded_credits",
               failureReason: "Crash recovered: unfulfilled order was refunded.",
               updatedAt: new Date(),
             }).where(eq(ordersMarket.id, existingOrder.id));
@@ -206,7 +221,6 @@ export async function POST(req: NextRequest) {
             );
           }
         } else {
-          // Never debited -> Refresh lease and proceed
           orderId = existingOrder.id;
           await db.update(ordersMarket).set({
             leaseExpiresAt: new Date(now + LEASE_DURATION_MS),
@@ -217,7 +231,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 7. Validate Product Server-Side State & Strict Integer Price
+    // 8. Validate Product Server-Side State & Strict Integer Price
     const product = (
       await db.select().from(products).where(eq(products.id, productId)).limit(1)
     )[0];
@@ -235,7 +249,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid product pricing configuration in catalog." }, { status: 400 });
     }
 
-    // 8. Prevent Duplicate Active Entitlement (Partial Unique Index Protection)
+    // 9. Re-validate GitHub Release Integrity before financial commit
+    const targetRepoUrl = product.repositoryUrl || product.githubRepositoryUrl || "https://github.com/valax-scrub/releases";
+    const targetReleaseUrl = product.releaseUrl || product.githubReleaseUrl;
+    const targetReleaseTag = product.releaseTag || `v${product.version}`;
+
+    const releaseVerification = await verifyGitHubRelease({
+      repositoryUrl: targetRepoUrl,
+      releaseUrl: targetReleaseUrl,
+      releaseTag: targetReleaseTag,
+      releaseVersion: product.releaseVersion || product.version,
+    });
+
+    if (!releaseVerification.isValid) {
+      // Auto-pause product if release disappeared or is invalid
+      await db.update(products).set({
+        status: "paused",
+        verificationStatus: "failed",
+        updatedAt: new Date(),
+      }).where(eq(products.id, product.id));
+
+      return NextResponse.json(
+        { error: `Release delivery check failed: ${releaseVerification.errorMessage || "GitHub release unavailable."} Product paused.` },
+        { status: 422 }
+      );
+    }
+
+    // 10. Prevent Duplicate Active Entitlement (Partial Unique Index Protection)
     const existingActiveEntitlement = await db
       .select()
       .from(productPurchases)
@@ -253,12 +293,12 @@ export async function POST(req: NextRequest) {
         success: true,
         isExisting: true,
         entitlementId: existingActiveEntitlement[0].id,
-        githubReleaseUrl: product.githubReleaseUrl,
+        githubReleaseUrl: targetReleaseUrl,
         message: "You already hold an active entitlement for this digital asset.",
       });
     }
 
-    // 9. Verify Buyer Wallet Balance
+    // 11. Verify Buyer Wallet Balance
     const buyerWallet = await getUserWallet(session.user.id);
     if (!buyerWallet || buyerWallet.balance < tokenPrice) {
       return NextResponse.json(
@@ -267,7 +307,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 10. Execute State Machine Transition -> 'processing' with Active Lease
+    // 12. Execute State Machine Transition -> 'validating_release' / 'processing'
     if (!existingOrder) {
       await db.insert(ordersMarket).values({
         id: orderId,
@@ -301,9 +341,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: debitResult.error || "Credit transaction failed." }, { status: 400 });
     }
 
-    // Step B: Issue Entitlement
+    // Step B: Issue Entitlement & Immutable Delivery Snapshot
     const purchaseId = `ent_${nanoid(16)}`;
     const entitlementKey = `VALAX-ENT-${nanoid(6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
+    const snapshotId = `dsnap_${nanoid(16)}`;
 
     try {
       await db.insert(productPurchases).values({
@@ -315,9 +356,27 @@ export async function POST(req: NextRequest) {
         idempotencyKey: rawIdempotencyKey,
         status: "active",
       });
+
+      // Insert Immutable Delivery Snapshot
+      await db.insert(orderDeliverySnapshots).values({
+        id: snapshotId,
+        orderId: orderId,
+        productId: product.id,
+        buyerId: session.user.id,
+        productTitle: product.title,
+        purchasedVersion: product.releaseVersion || product.version,
+        releaseTag: targetReleaseTag,
+        repositoryUrl: targetRepoUrl,
+        releaseUrl: targetReleaseUrl,
+        releaseAssetUrl: releaseVerification.assetUrl || product.releaseAssetUrl || null,
+        releaseCommitSha: releaseVerification.commitSha || product.releaseCommitSha || null,
+        releaseChecksum: product.releaseChecksum || null,
+        deliveryStatus: "fulfilled",
+        deliveryNotes: "Automated verified GitHub Release delivery",
+      });
     } catch (insertErr: any) {
       // Step B-Rollback: Execute Compensation Refund
-      console.error("[Purchase Compensation] Entitlement insert failed. Executing refund...", insertErr);
+      console.error("[Purchase Compensation] Entitlement/Snapshot failed. Executing refund...", insertErr);
       await db
         .update(ordersMarket)
         .set({ status: "compensating", failureReason: insertErr?.message || "Entitlement insert conflict", updatedAt: new Date() })
@@ -336,7 +395,7 @@ export async function POST(req: NextRequest) {
       if (refundResult.success) {
         await db
           .update(ordersMarket)
-          .set({ status: "failed", failureReason: "Entitlement creation failed. Full credit refund completed.", updatedAt: new Date() })
+          .set({ status: "refunded_credits", failureReason: "Entitlement creation failed. Full credit refund completed.", updatedAt: new Date() })
           .where(eq(ordersMarket.id, orderId));
 
         return NextResponse.json(
@@ -344,7 +403,6 @@ export async function POST(req: NextRequest) {
           { status: 409 }
         );
       } else {
-        // Critical: Refund also failed -> Escalate to manual review
         await db
           .update(ordersMarket)
           .set({ status: "manual_review", recoveryRequired: true, failureReason: "CRITICAL: Entitlement failed and compensation refund failed.", updatedAt: new Date() })
@@ -384,17 +442,24 @@ export async function POST(req: NextRequest) {
         action: "MARKET_PURCHASE",
         targetType: "product",
         targetId: product.id,
-        details: JSON.stringify({ purchaseId, orderId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
+        details: JSON.stringify({
+          purchaseId,
+          orderId,
+          snapshotId,
+          tokensSpent: tokenPrice,
+          releaseTag: targetReleaseTag,
+          idempotencyKey: rawIdempotencyKey,
+        }),
       });
     } catch (audErr) {
       console.warn("[Purchase Warning] Audit log write failed non-fatally");
     }
 
-    // Step E: Complete State Machine Order Transition -> 'completed'
+    // Step E: Complete State Machine Order Transition -> 'fulfilled'
     await db
       .update(ordersMarket)
       .set({
-        status: "completed",
+        status: "fulfilled",
         entitlementId: purchaseId,
         ledgerReference: `ledger_${rawIdempotencyKey}`,
         updatedAt: new Date(),
@@ -404,7 +469,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       entitlementId: purchaseId,
-      githubReleaseUrl: product.githubReleaseUrl,
+      orderId: orderId,
+      purchasedVersion: product.releaseVersion || product.version,
+      releaseUrl: targetReleaseUrl,
+      releaseTag: targetReleaseTag,
+      releaseChecksum: product.releaseChecksum || null,
+      message: "Purchase completed and verified release entitlement delivered.",
     });
   } catch (err: any) {
     return handleApiError(err, { publicMessage: "Digital asset purchase could not be completed.", route: "/api/market/purchase" });

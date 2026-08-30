@@ -65,6 +65,7 @@ export async function runMigrations(targetClient?: Client): Promise<MigrationRes
     "0003_market_orders_state_machine.sql",
     "0004_add_public_session_id.sql",
     "0005_sessions_not_null.sql",
+    "0006_marketplace_automated_delivery.sql",
   ];
 
   let appliedCount = 0;

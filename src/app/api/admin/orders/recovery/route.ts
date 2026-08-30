@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       await db
         .update(ordersMarket)
         .set({
-          status: "completed",
+          status: "fulfilled",
           entitlementId: purchaseId,
           recoveryRequired: false,
           failureReason: null,
