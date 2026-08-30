@@ -113,15 +113,19 @@ export async function setSessionCookie(rawToken: string) {
 }
 
 export async function clearSessionCookie() {
-  const cookieStore = cookies();
-  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (rawToken) {
-    try {
-      const tokenHash = hashSessionToken(rawToken);
-      await db.delete(sessions).where(eq(sessions.id, tokenHash));
-    } catch {}
+  try {
+    const cookieStore = cookies();
+    const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    if (rawToken) {
+      try {
+        const tokenHash = hashSessionToken(rawToken);
+        await db.delete(sessions).where(eq(sessions.id, tokenHash));
+      } catch {}
+    }
+    cookieStore.delete(SESSION_COOKIE_NAME);
+  } catch {
+    // Graceful fallback in standalone execution without Next request store
   }
-  cookieStore.delete(SESSION_COOKIE_NAME);
 }
 
 export async function revokeAllUserSessions(userId: string) {

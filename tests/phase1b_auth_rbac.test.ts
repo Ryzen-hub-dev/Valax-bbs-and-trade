@@ -211,42 +211,78 @@ async function runPhase1BTestSuite() {
   const expiredResult = await getCurrentSession(reqExpired);
   assert(expiredResult === null, "Expired session rejected by database query");
 
-  // 9. Session Revocation (Exact publicSessionId Match vs Prefix Rejection)
-  console.log("\n--- 9. Testing Exact publicSessionId Revocation vs Prefix Rejection ---");
-  const tempToken = await createSession(regularUserId, "Mozilla/5.0 (iPhone)", "192.168.1.99");
-  const tempHash = hashSessionToken(tempToken);
-  const tempDbSession = (await db.select().from(sessions).where(eq(sessions.id, tempHash)).limit(1))[0];
-  const fullPublicId = tempDbSession.publicSessionId!;
+  // 9. Session Migration & Exact publicSessionId Revocation Regression
+  console.log("\n--- 9. Testing Legacy NULL Session Migration & Exact Revocation Regression ---");
 
-  // Try prefix matching (should be rejected with 400 or 404)
-  const prefixId = fullPublicId.slice(0, 16);
+  // 9a. Simulate legacy session created before migration (public_session_id = NULL)
+  const legacyRawToken = `raw_legacy_${nanoid(16)}`;
+  const legacyHash = hashSessionToken(legacyRawToken);
+  await client.execute({
+    sql: "INSERT INTO sessions (id, user_id, expires_at, created_at, user_agent, ip_address, public_session_id) VALUES (?, ?, ?, ?, ?, ?, NULL);",
+    args: [legacyHash, regularUserId, Math.floor((Date.now() + 86400000) / 1000), Math.floor(Date.now() / 1000), "Mozilla/5.0 (Legacy Device)", "192.168.1.88"],
+  });
+
+  const checkLegacyBefore = (await db.select().from(sessions).where(eq(sessions.id, legacyHash)).limit(1))[0];
+  assert(checkLegacyBefore.publicSessionId === null, "Legacy session inserted with NULL public_session_id");
+
+  // 9b. Execute migration backfill query
+  await client.execute("UPDATE sessions SET public_session_id = 'psess_' || lower(hex(randomblob(16))) WHERE public_session_id IS NULL;");
+
+  const checkLegacyAfter = (await db.select().from(sessions).where(eq(sessions.id, legacyHash)).limit(1))[0];
+  const legacyPublicId = checkLegacyAfter.publicSessionId!;
+  assert(
+    !!legacyPublicId && legacyPublicId.startsWith("psess_") && legacyPublicId.length >= 24,
+    `Legacy session backfilled with unique publicSessionId (${legacyPublicId})`
+  );
+
+  // 9c. GET /api/auth/sessions returns the backfilled ID
+  const reqLegacyGet = makeReq("/api/auth/sessions", { token: legacyRawToken, method: "GET" });
+  const resLegacyGet = await sessionsGetRoute(reqLegacyGet);
+  const dataLegacyGet = await resLegacyGet.json();
+  const foundLegacySession = dataLegacyGet.sessions?.find((s: any) => s.publicSessionId === legacyPublicId);
+  assert(
+    resLegacyGet.status === 200 && foundLegacySession !== undefined && foundLegacySession.isCurrent === true,
+    "GET /api/auth/sessions successfully returned backfilled legacy session"
+  );
+
+  // 9d. Try prefix revocation (rejected 400)
+  const prefixId = legacyPublicId.slice(0, 16);
   const reqPrefixRevoke = makeReq("/api/auth/sessions", {
-    token: rawUserToken,
+    token: legacyRawToken,
     method: "DELETE",
     body: { publicSessionId: prefixId },
   });
   const resPrefixRevoke = await sessionsDeleteRoute(reqPrefixRevoke);
-  assert(resPrefixRevoke.status === 400 || resPrefixRevoke.status === 404, "Prefix publicSessionId revocation rejected");
+  assert(resPrefixRevoke.status === 400, "Prefix publicSessionId revocation rejected with HTTP 400");
 
-  // Try revoking someone else's session (should be 404)
+  // 9e. Try forged ID revocation (rejected 404)
+  const reqForgedRevoke = makeReq("/api/auth/sessions", {
+    token: legacyRawToken,
+    method: "DELETE",
+    body: { publicSessionId: "psess_forged_random_fake_session_id_9999" },
+  });
+  const resForgedRevoke = await sessionsDeleteRoute(reqForgedRevoke);
+  assert(resForgedRevoke.status === 404, "Forged publicSessionId revocation rejected with HTTP 404");
+
+  // 9f. Try revoking another user's session (rejected 404)
   const otherUserDbSession = (await db.select().from(sessions).where(eq(sessions.userId, otherUserId)).limit(1))[0];
   const reqOtherRevoke = makeReq("/api/auth/sessions", {
-    token: rawUserToken,
+    token: legacyRawToken,
     method: "DELETE",
     body: { publicSessionId: otherUserDbSession.publicSessionId },
   });
   const resOtherRevoke = await sessionsDeleteRoute(reqOtherRevoke);
-  assert(resOtherRevoke.status === 404, "Attempting to revoke another user's session rejected with HTTP 404");
+  assert(resOtherRevoke.status === 404, "Revoking another user's session rejected with HTTP 404");
 
-  // Exact publicSessionId revocation (success)
+  // 9g. Exact revocation of legacy session (success 200)
   const reqExactRevoke = makeReq("/api/auth/sessions", {
-    token: rawUserToken,
+    token: legacyRawToken,
     method: "DELETE",
-    body: { publicSessionId: fullPublicId },
+    body: { publicSessionId: legacyPublicId },
   });
   const resExactRevoke = await sessionsDeleteRoute(reqExactRevoke);
-  const sessionAfterRevoke = (await db.select().from(sessions).where(eq(sessions.id, tempHash)).limit(1))[0];
-  assert(resExactRevoke.status === 200 && sessionAfterRevoke === undefined, "Exact publicSessionId successfully revoked session");
+  const sessionAfterRevoke = (await db.select().from(sessions).where(eq(sessions.id, legacyHash)).limit(1))[0];
+  assert(resExactRevoke.status === 200 && sessionAfterRevoke === undefined, "Exact publicSessionId successfully revoked legacy session");
 
   // 10. Revoke All Other Devices
   console.log("\n--- 10. Testing Revoke All Other Sessions ---");
