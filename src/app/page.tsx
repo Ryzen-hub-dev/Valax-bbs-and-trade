@@ -2,43 +2,54 @@ import Link from "next/link";
 import { db } from "@/db";
 import { forumThreads, products, users } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { MessageSquare, ShoppingBag, Coins, ShieldCheck, Flame, PlusCircle, ArrowRight, Sparkles, Code2, Award } from "lucide-react";
+import { MessageSquare, ShoppingBag, Coins, ShieldCheck, Flame, PlusCircle, Sparkles, Code2, Award, AlertCircle } from "lucide-react";
 import { FadeIn, StaggerList } from "@/components/animations/gsap-wrapper";
 
-export default async function RootPortalPage() {
-  const hotThreads = await db
-    .select({
-      id: forumThreads.id,
-      title: forumThreads.title,
-      slug: forumThreads.slug,
-      repliesCount: forumThreads.repliesCount,
-      likesCount: forumThreads.likesCount,
-      createdAt: forumThreads.createdAt,
-      author: { username: users.username },
-    })
-    .from(forumThreads)
-    .innerJoin(users, eq(forumThreads.authorId, users.id))
-    .where(eq(forumThreads.status, "published"))
-    .orderBy(desc(forumThreads.likesCount))
-    .limit(5);
+export const dynamic = "force-dynamic";
 
-  const featuredProducts = await db
-    .select({
-      id: products.id,
-      title: products.title,
-      slug: products.slug,
-      shortDescription: products.shortDescription,
-      category: products.category,
-      tokenPrice: products.tokenPrice,
-      version: products.version,
-      salesCount: products.salesCount,
-      developer: { username: users.username },
-    })
-    .from(products)
-    .innerJoin(users, eq(products.developerId, users.id))
-    .where(eq(products.status, "active"))
-    .orderBy(desc(products.salesCount))
-    .limit(4);
+export default async function RootPortalPage() {
+  let hotThreads: any[] = [];
+  let featuredProducts: any[] = [];
+  let dbError = false;
+
+  try {
+    hotThreads = await db
+      .select({
+        id: forumThreads.id,
+        title: forumThreads.title,
+        slug: forumThreads.slug,
+        repliesCount: forumThreads.repliesCount,
+        likesCount: forumThreads.likesCount,
+        createdAt: forumThreads.createdAt,
+        author: { username: users.username },
+      })
+      .from(forumThreads)
+      .innerJoin(users, eq(forumThreads.authorId, users.id))
+      .where(eq(forumThreads.status, "published"))
+      .orderBy(desc(forumThreads.likesCount))
+      .limit(5);
+
+    featuredProducts = await db
+      .select({
+        id: products.id,
+        title: products.title,
+        slug: products.slug,
+        shortDescription: products.shortDescription,
+        category: products.category,
+        tokenPrice: products.tokenPrice,
+        version: products.version,
+        salesCount: products.salesCount,
+        developer: { username: users.username },
+      })
+      .from(products)
+      .innerJoin(users, eq(products.developerId, users.id))
+      .where(eq(products.status, "active"))
+      .orderBy(desc(products.salesCount))
+      .limit(4);
+  } catch (err) {
+    console.error("Database connection warning on landing page:", err);
+    dbError = true;
+  }
 
   return (
     <div className="space-y-12">
@@ -77,6 +88,16 @@ export default async function RootPortalPage() {
         </div>
       </FadeIn>
 
+      {dbError && (
+        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-3">
+          <AlertCircle className="h-5 w-5 shrink-0 text-amber-400" />
+          <div>
+            <p className="font-semibold">提示：尚未在 Vercel 配置数据库环境变量</p>
+            <p className="text-amber-300/80 mt-0.5">请前往 Vercel 控制台 Project Settings &gt; Environment Variables 添加 TURSO_DATABASE_URL 和 TURSO_AUTH_TOKEN。</p>
+          </div>
+        </div>
+      )}
+
       {/* Feature Highlights Grid */}
       <StaggerList className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="p-6 rounded-2xl border border-slate-800/80 bg-slate-900/40 space-y-3">
@@ -110,7 +131,7 @@ export default async function RootPortalPage() {
         </div>
       </StaggerList>
 
-      {/* Split Section (Hot BBS Threads + Featured Marketplace Assets) */}
+      {/* Split Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Left: Hot BBS Threads */}
         <div className="space-y-4">
@@ -125,24 +146,30 @@ export default async function RootPortalPage() {
           </div>
 
           <div className="space-y-3">
-            {hotThreads.map((t) => (
-              <Link
-                key={t.id}
-                href={`/bbs/thread/${t.slug}`}
-                className="block p-4 rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/80 hover:border-slate-700 transition-all"
-              >
-                <h3 className="font-bold text-sm text-slate-100 hover:text-blue-400 transition-colors line-clamp-1">
-                  {t.title}
-                </h3>
-                <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                  <span>作者: {t.author.username}</span>
-                  <div className="flex items-center gap-3">
-                    <span>{t.likesCount} 点赞</span>
-                    <span>{t.repliesCount} 回复</span>
+            {hotThreads.length === 0 ? (
+              <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
+                暂无帖子记录，点击上方按钮发布第一篇讨论！
+              </div>
+            ) : (
+              hotThreads.map((t) => (
+                <Link
+                  key={t.id}
+                  href={`/bbs/thread/${t.slug}`}
+                  className="block p-4 rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/80 hover:border-slate-700 transition-all"
+                >
+                  <h3 className="font-bold text-sm text-slate-100 hover:text-blue-400 transition-colors line-clamp-1">
+                    {t.title}
+                  </h3>
+                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                    <span>作者: {t.author?.username || "社区成员"}</span>
+                    <div className="flex items-center gap-3">
+                      <span>{t.likesCount} 点赞</span>
+                      <span>{t.repliesCount} 回复</span>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              ))
+            )}
           </div>
         </div>
 
@@ -159,29 +186,35 @@ export default async function RootPortalPage() {
           </div>
 
           <div className="space-y-3">
-            {featuredProducts.map((p) => (
-              <Link
-                key={p.id}
-                href={`/market/${p.slug}`}
-                className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/80 hover:border-slate-700 transition-all flex items-center justify-between gap-4"
-              >
-                <div className="min-w-0 space-y-1">
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40">
-                    {p.category}
-                  </span>
-                  <h3 className="font-bold text-sm text-slate-100 truncate">{p.title}</h3>
-                  <div className="text-xs text-slate-500">创作者: {p.developer.username}</div>
-                </div>
-
-                <div className="shrink-0 text-right space-y-1">
-                  <div className="flex items-center gap-1 text-sm font-bold text-amber-400">
-                    <Coins className="h-4 w-4" />
-                    <span>{p.tokenPrice}</span>
+            {featuredProducts.length === 0 ? (
+              <div className="p-8 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 text-xs">
+                暂无商品上架，点击“发布数字商品”提交！
+              </div>
+            ) : (
+              featuredProducts.map((p) => (
+                <Link
+                  key={p.id}
+                  href={`/market/${p.slug}`}
+                  className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/80 hover:border-slate-700 transition-all flex items-center justify-between gap-4"
+                >
+                  <div className="min-w-0 space-y-1">
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                      {p.category}
+                    </span>
+                    <h3 className="font-bold text-sm text-slate-100 truncate">{p.title}</h3>
+                    <div className="text-xs text-slate-500">创作者: {p.developer?.username || "开发者"}</div>
                   </div>
-                  <div className="text-[10px] text-slate-500">已售 {p.salesCount}</div>
-                </div>
-              </Link>
-            ))}
+
+                  <div className="shrink-0 text-right space-y-1">
+                    <div className="flex items-center gap-1 text-sm font-bold text-amber-400">
+                      <Coins className="h-4 w-4" />
+                      <span>{p.tokenPrice}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500">已售 {p.salesCount}</div>
+                  </div>
+                </Link>
+              ))
+            )}
           </div>
         </div>
       </div>

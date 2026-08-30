@@ -2,12 +2,22 @@ import Link from "next/link";
 import { getCurrentSession } from "@/lib/auth";
 import { getUserWallet } from "@/lib/ledger";
 import { isUserAdmin } from "@/lib/rbac";
-import { Coins, LogIn, LogOut, Shield, User, ShoppingBag, MessageSquare, PlusCircle } from "lucide-react";
+import { Coins, LogIn, LogOut, Shield, User, ShoppingBag, MessageSquare } from "lucide-react";
 
 export async function Navbar() {
-  const session = await getCurrentSession();
-  const wallet = session ? await getUserWallet(session.user.id) : null;
-  const isAdmin = session ? isUserAdmin(session.user) : false;
+  let session = null;
+  let wallet = null;
+  let isAdmin = false;
+
+  try {
+    session = await getCurrentSession();
+    if (session) {
+      wallet = await getUserWallet(session.user.id);
+      isAdmin = isUserAdmin(session.user);
+    }
+  } catch (err) {
+    console.error("Navbar session check error:", err);
+  }
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md">
@@ -15,9 +25,8 @@ export async function Navbar() {
         {/* Brand */}
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="h-9 w-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 p-0.5 shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform flex items-center justify-center font-bold text-white text-lg">
-              V
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.svg" alt="Valax Logo" className="h-9 w-9 rounded-lg shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform" />
             <div className="flex flex-col">
               <span className="text-base font-bold text-white tracking-tight flex items-center gap-1.5">
                 Valax Scrub <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-400 border border-blue-700/50">BBS & Trade</span>
