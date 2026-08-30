@@ -209,7 +209,27 @@ export const products = sqliteTable("products", {
   moderationStatusIdx: index("products_mod_status_idx").on(table.moderationStatus),
 }));
 
-// 13. Digital Product Purchases and Entitlements (Financial Data Preserved, User+Idempotency Unique)
+// 13. Marketplace Orders State Machine (Trackable lifecycle & failure compensation)
+export const ordersMarket = sqliteTable("orders_market", {
+  id: text("id").primaryKey(),
+  buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  productId: text("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  idempotencyKey: text("idempotency_key").notNull(),
+  amount: integer("amount").notNull(),
+  status: text("status", { enum: ["pending", "processing", "completed", "failed", "compensating", "manual_review"] }).default("pending").notNull(),
+  ledgerReference: text("ledger_reference"),
+  entitlementId: text("entitlement_id"),
+  failureReason: text("failure_reason"),
+  createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
+}, (table) => ({
+  buyerIdempotencyUnique: uniqueIndex("orders_buyer_idempotency_idx").on(table.buyerId, table.idempotencyKey),
+  buyerIdIdx: index("orders_market_buyer_id_idx").on(table.buyerId),
+  productIdIdx: index("orders_market_product_id_idx").on(table.productId),
+  statusIdx: index("orders_market_status_idx").on(table.status),
+}));
+
+// 14. Digital Product Purchases and Entitlements (Financial Data Preserved, User+Idempotency Unique)
 export const productPurchases = sqliteTable("product_purchases", {
   id: text("id").primaryKey(),
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
@@ -227,7 +247,7 @@ export const productPurchases = sqliteTable("product_purchases", {
   buyerProductStatusIdx: index("purchases_buyer_product_status_idx").on(table.buyerId, table.productId, table.status),
 }));
 
-// 14. PayPal Orders (Financial Data Preserved)
+// 15. PayPal Orders (Financial Data Preserved)
 export const ordersPaypal = sqliteTable("orders_paypal", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
@@ -243,7 +263,7 @@ export const ordersPaypal = sqliteTable("orders_paypal", {
   paypalOrderIdIdx: index("orders_paypal_order_id_idx").on(table.paypalOrderId),
 }));
 
-// 15. Moderation Reports
+// 16. Moderation Reports
 export const reports = sqliteTable("reports", {
   id: text("id").primaryKey(),
   reporterId: text("reporter_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -260,7 +280,7 @@ export const reports = sqliteTable("reports", {
   targetIdx: index("reports_target_idx").on(table.targetType, table.targetId),
 }));
 
-// 16. In-App Notifications
+// 17. In-App Notifications
 export const notifications = sqliteTable("notifications", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -277,7 +297,7 @@ export const notifications = sqliteTable("notifications", {
   createdAtIdx: index("notifications_created_at_idx").on(table.createdAt),
 }));
 
-// 17. Immutable Audit Logs (Never deleted on user removal)
+// 18. Immutable Audit Logs (Never deleted on user removal)
 export const auditLogs = sqliteTable("audit_logs", {
   id: text("id").primaryKey(),
   operatorId: text("operator_id").references(() => users.id, { onDelete: "set null" }),
@@ -292,14 +312,14 @@ export const auditLogs = sqliteTable("audit_logs", {
   createdAtIdx: index("audit_created_at_idx").on(table.createdAt),
 }));
 
-// 18. System Settings (Feature Flags & Policies)
+// 19. System Settings (Feature Flags & Policies)
 export const systemSettings = sqliteTable("system_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
 });
 
-// 19. Distributed Turso-Backed Rate Limiting (Serverless multi-instance support)
+// 20. Distributed Turso-Backed Rate Limiting (Serverless multi-instance support)
 export const rateLimitEvents = sqliteTable("rate_limit_events", {
   key: text("key").primaryKey(),
   count: integer("count").default(1).notNull(),

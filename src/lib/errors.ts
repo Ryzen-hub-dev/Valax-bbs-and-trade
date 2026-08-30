@@ -1,39 +1,45 @@
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 
-export interface ApiErrorOptions {
-  status?: number;
-  publicMessage?: string;
-  internalDetails?: unknown;
+export interface ApiErrorResponse {
+  error: string;
+  requestId: string;
+  timestamp: string;
 }
 
-/**
- * Handles API errors safely in production.
- * Desensitizes internal error details, logs with a unique requestId, and masks secrets.
- */
-export function handleApiError(err: unknown, options: ApiErrorOptions = {}): NextResponse {
-  const requestId = `req_${nanoid(12)}`;
-  const status = options.status || 500;
-  const isProd = process.env.NODE_ENV === "production";
+export function generateRequestId(): string {
+  return `req_${nanoid(12)}`;
+}
 
-  const rawMessage = err instanceof Error ? err.message : String(err);
+export function sanitizeErrorMessage(err: unknown): string {
+  if (!err) return "An unexpected error occurred.";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) {
+    if (process.env.NODE_ENV !== "production") {
+      return err.message;
+    }
+    return "A server exception occurred while processing your request.";
+  }
+  return "An unexpected server exception occurred.";
+}
 
-  // Mask any accidental tokens/secrets in logs
-  const sanitizedLog = rawMessage
-    .replace(/(ey[a-zA-Z0-9_-]{20,})/g, "[REDACTED_JWT]")
-    .replace(/(valax_session_[a-zA-Z0-9_-]+)/g, "[REDACTED_SESSION]")
-    .replace(/(VALAX-ENT-[a-zA-Z0-9_-]+)/g, "[REDACTED_KEY]");
+export function handleApiError(
+  err: unknown,
+  options?: { status?: number; publicMessage?: string }
+): NextResponse<ApiErrorResponse> {
+  const requestId = generateRequestId();
+  const timestamp = new Date().toISOString();
+  const status = options?.status || 500;
 
-  console.error(`[API Error][${requestId}] Status ${status}:`, sanitizedLog, options.internalDetails || "");
+  console.error(`[API Error] [${requestId}]`, err);
 
-  const userMessage = isProd
-    ? options.publicMessage || "An internal error occurred. Please try again later."
-    : options.publicMessage || rawMessage;
+  const error = options?.publicMessage || sanitizeErrorMessage(err);
 
   return NextResponse.json(
     {
-      error: userMessage,
+      error,
       requestId,
+      timestamp,
     },
     { status }
   );

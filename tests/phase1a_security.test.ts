@@ -2,7 +2,7 @@ import { createClient } from "@libsql/client";
 import crypto from "crypto";
 import dotenv from "dotenv";
 import { STATIC_ALLOWED_ORIGINS, getSafeOrigin } from "@/config/origins";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 
 dotenv.config();
 
@@ -63,10 +63,10 @@ async function runTests() {
   const testKey = `test_rate_${Date.now()}`;
   let ratePassed = true;
   for (let i = 0; i < 5; i++) {
-    const res = checkRateLimit(testKey, { maxRequests: 5, windowSeconds: 10 });
+    const res = await checkRateLimitAsync(testKey, { maxRequests: 5, windowSeconds: 10 });
     if (!res.allowed) ratePassed = false;
   }
-  const overflowRes = checkRateLimit(testKey, { maxRequests: 5, windowSeconds: 10 });
+  const overflowRes = await checkRateLimitAsync(testKey, { maxRequests: 5, windowSeconds: 10 });
   assert(ratePassed, "Allowed requests within rate limit threshold");
   assert(overflowRes.allowed === false, "6th request exceeded limit and was blocked (429)");
 

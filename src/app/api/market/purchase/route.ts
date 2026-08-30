@@ -1,8 +1,8 @@
 import { db } from "@/db";
-import { products, productPurchases, walletAccounts, walletLedger, auditLogs } from "@/db/schema";
+import { products, productPurchases, ordersMarket, auditLogs } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
 import { getUserWallet, executeLedgerTransaction } from "@/lib/ledger";
-import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError } from "@/lib/errors";
 import { eq, and, sql } from "drizzle-orm";
@@ -26,14 +26,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }
 
-  // 2. Strict CSRF & Origin Validation (Mandatory for state-mutating requests)
+  // 2. Strict CSRF & Origin Validation
   const csrf = validateCsrfOrigin(req);
   if (!csrf.isValid) {
     return csrf.errorResponse!;
   }
 
-  // 3. Distributed IP + User Rate Limiting (Max 10 purchase requests per minute)
-  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown_ip";
+  // 3. Distributed IP + User Rate Limiting
+  const clientIp = getClientIp(req);
   const rateKey = `purchase:${session.user.id}:${clientIp}`;
   const rate = await checkRateLimitAsync(rateKey, { maxRequests: 10, windowSeconds: 60 });
   if (!rate.allowed) {
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   const rawIdempotencyKey = req.headers.get("Idempotency-Key")?.trim();
   if (!rawIdempotencyKey) {
     return NextResponse.json(
-      { error: "Idempotency-Key header is required for purchase transactions." },
+      { error: "Idempotency-Key header is mandatory for purchase transactions." },
       { status: 400 }
     );
   }
@@ -69,39 +69,56 @@ export async function POST(req: NextRequest) {
     const body = JSON.parse(rawBodyText || "{}");
     const { productId } = purchaseSchema.parse(body);
 
-    // 6. Check Prior Purchase by (buyerId, idempotencyKey)
-    const existingByIdempotency = await db
-      .select()
-      .from(productPurchases)
-      .where(
-        and(
-          eq(productPurchases.buyerId, session.user.id),
-          eq(productPurchases.idempotencyKey, rawIdempotencyKey)
+    // 6. Check Order State Machine by (buyerId, idempotencyKey)
+    const existingOrder = (
+      await db
+        .select()
+        .from(ordersMarket)
+        .where(
+          and(
+            eq(ordersMarket.buyerId, session.user.id),
+            eq(ordersMarket.idempotencyKey, rawIdempotencyKey)
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    )[0];
 
-    if (existingByIdempotency.length > 0) {
-      const priorEnt = existingByIdempotency[0];
-      // Conflict check: Same key cannot be reused for a different product
-      if (priorEnt.productId !== productId) {
+    if (existingOrder) {
+      // Conflict check: Same Idempotency-Key reused for a different product
+      if (existingOrder.productId !== productId) {
         return NextResponse.json(
-          { error: "Idempotency conflict: This Idempotency-Key was already used for a different digital asset." },
+          { error: "Idempotency conflict: This Idempotency-Key was previously used for a different product." },
           { status: 409 }
         );
       }
 
-      const prod = (
-        await db.select().from(products).where(eq(products.id, priorEnt.productId)).limit(1)
-      )[0];
+      if (existingOrder.status === "completed" && existingOrder.entitlementId) {
+        const prod = (
+          await db.select().from(products).where(eq(products.id, existingOrder.productId)).limit(1)
+        )[0];
 
-      return NextResponse.json({
-        success: true,
-        isIdempotentReplay: true,
-        entitlementId: priorEnt.id,
-        githubReleaseUrl: prod?.githubReleaseUrl || "",
-        message: "Previous transaction confirmed. No additional credits deducted.",
-      });
+        return NextResponse.json({
+          success: true,
+          isIdempotentReplay: true,
+          entitlementId: existingOrder.entitlementId,
+          githubReleaseUrl: prod?.githubReleaseUrl || "",
+          message: "Previous transaction confirmed. No additional credits deducted.",
+        });
+      }
+
+      if (existingOrder.status === "processing") {
+        return NextResponse.json(
+          { error: "Order is currently being processed. Please check your inventory in a moment." },
+          { status: 409 }
+        );
+      }
+
+      if (existingOrder.status === "manual_review") {
+        return NextResponse.json(
+          { error: "Order is flagged for manual review by platform administration." },
+          { status: 422 }
+        );
+      }
     }
 
     // 7. Validate Product Server-Side State & Strict Integer Price
@@ -154,9 +171,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 10. Atomic Purchase Execution
-    const purchaseId = `ent_${nanoid(16)}`;
-    const entitlementKey = `VALAX-ENT-${nanoid(6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
+    // 10. Execute State Machine Transition -> 'processing'
+    const orderId = `ord_${nanoid(16)}`;
+    await db.insert(ordersMarket).values({
+      id: orderId,
+      buyerId: session.user.id,
+      productId: product.id,
+      idempotencyKey: rawIdempotencyKey,
+      amount: tokenPrice,
+      status: "processing",
+    });
 
     // Step A: Debit Buyer Ledger
     const debitResult = await executeLedgerTransaction({
@@ -166,14 +190,22 @@ export async function POST(req: NextRequest) {
       source: "Marketplace Purchase",
       referenceId: productId,
       idempotencyKey: `ledger_${rawIdempotencyKey}`,
-      notes: `Purchase Entitlement: ${product.title}`,
+      notes: `Purchase: ${product.title}`,
     });
 
     if (!debitResult.success) {
+      await db
+        .update(ordersMarket)
+        .set({ status: "failed", failureReason: debitResult.error || "Credit transaction failed", updatedAt: new Date() })
+        .where(eq(ordersMarket.id, orderId));
+
       return NextResponse.json({ error: debitResult.error || "Credit transaction failed." }, { status: 400 });
     }
 
-    // Step B: Insert Entitlement Record
+    // Step B: Issue Entitlement
+    const purchaseId = `ent_${nanoid(16)}`;
+    const entitlementKey = `VALAX-ENT-${nanoid(6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
+
     try {
       await db.insert(productPurchases).values({
         id: purchaseId,
@@ -185,37 +217,57 @@ export async function POST(req: NextRequest) {
         status: "active",
       });
     } catch (insertErr: any) {
-      // Automatic Compensation Rollback
-      console.error("[Purchase Error] Entitlement insert failed. Executing compensation rollback...", insertErr);
-      const rollbackResult = await executeLedgerTransaction({
+      // Step B-Rollback: Execute Compensation Refund
+      console.error("[Purchase Compensation] Entitlement insert failed. Executing refund...", insertErr);
+      await db
+        .update(ordersMarket)
+        .set({ status: "compensating", failureReason: insertErr?.message || "Entitlement insert conflict", updatedAt: new Date() })
+        .where(eq(ordersMarket.id, orderId));
+
+      const refundResult = await executeLedgerTransaction({
         userId: session.user.id,
         amount: tokenPrice,
         type: "admin_adjustment",
         source: "Purchase Rollback / Compensation",
         referenceId: productId,
-        idempotencyKey: `rollback_${rawIdempotencyKey}`,
-        notes: `Rollback duplicate purchase for: ${product.title}`,
+        idempotencyKey: `refund_${rawIdempotencyKey}`,
+        notes: `Rollback purchase for: ${product.title}`,
       });
 
-      if (!rollbackResult.success) {
-        // Log critical recovery record in audit logs
+      if (refundResult.success) {
+        await db
+          .update(ordersMarket)
+          .set({ status: "failed", failureReason: "Entitlement creation failed. Full credit refund completed.", updatedAt: new Date() })
+          .where(eq(ordersMarket.id, orderId));
+
+        return NextResponse.json(
+          { error: "Conflict: Concurrent purchase in progress or active entitlement already exists. Credits refunded." },
+          { status: 409 }
+        );
+      } else {
+        // Critical: Refund also failed -> Escalate to manual review
+        await db
+          .update(ordersMarket)
+          .set({ status: "manual_review", failureReason: "CRITICAL: Entitlement failed and compensation refund failed.", updatedAt: new Date() })
+          .where(eq(ordersMarket.id, orderId));
+
         await db.insert(auditLogs).values({
           id: `crit_${nanoid(16)}`,
           operatorId: session.user.id,
-          action: "CRITICAL_RECOVERY_REQUIRED",
-          targetType: "product_purchase",
-          targetId: purchaseId,
-          details: JSON.stringify({ error: insertErr?.message, buyerId: session.user.id, tokenPrice }),
+          action: "CRITICAL_MANUAL_REVIEW_REQUIRED",
+          targetType: "orders_market",
+          targetId: orderId,
+          details: JSON.stringify({ buyerId: session.user.id, tokenPrice, insertErr: insertErr?.message, refundErr: refundResult.error }),
         });
-      }
 
-      return NextResponse.json(
-        { error: "Conflict: Concurrent purchase already in progress or active entitlement exists." },
-        { status: 409 }
-      );
+        return NextResponse.json(
+          { error: "A transaction exception occurred. The order has been submitted for manual admin resolution." },
+          { status: 500 }
+        );
+      }
     }
 
-    // Step C: Increment Sales Counter
+    // Step C: Increment Sales Counter (Non-blocking but logged)
     try {
       await db
         .update(products)
@@ -233,11 +285,22 @@ export async function POST(req: NextRequest) {
         action: "MARKET_PURCHASE",
         targetType: "product",
         targetId: product.id,
-        details: JSON.stringify({ purchaseId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
+        details: JSON.stringify({ purchaseId, orderId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
       });
     } catch (audErr) {
       console.warn("[Purchase Warning] Audit log write failed non-fatally:", audErr);
     }
+
+    // Step E: Complete State Machine Order Transition -> 'completed'
+    await db
+      .update(ordersMarket)
+      .set({
+        status: "completed",
+        entitlementId: purchaseId,
+        ledgerReference: `ledger_${rawIdempotencyKey}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(ordersMarket.id, orderId));
 
     return NextResponse.json({
       success: true,
