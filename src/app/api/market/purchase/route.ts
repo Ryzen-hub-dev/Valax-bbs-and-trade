@@ -2,6 +2,8 @@ import { db } from "@/db";
 import { products, productPurchases, walletAccounts, walletLedger, auditLogs } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
 import { executeLedgerTransaction, getUserWallet } from "@/lib/ledger";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getSafeOrigin } from "@/config/origins";
 import { handleApiError } from "@/lib/errors";
 import { eq, and, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -10,20 +12,91 @@ import { z } from "zod";
 
 const purchaseSchema = z.object({
   productId: z.string().min(1).max(64),
-  idempotencyKey: z.string().max(128).optional(),
 });
 
+const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_-]{8,128}$/;
+
 export async function POST(req: NextRequest) {
+  // 1. Authenticate Session
   const session = await getCurrentSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }
 
-  try {
-    const body = await req.json();
-    const { productId, idempotencyKey: clientKey } = purchaseSchema.parse(body);
+  // 2. CSRF & Origin Validation
+  const originHeader = req.headers.get("origin") || req.headers.get("referer");
+  if (originHeader) {
+    const verifiedOrigin = getSafeOrigin(originHeader);
+    if (!verifiedOrigin) {
+      return NextResponse.json({ error: "Forbidden: Untrusted Origin or Referer." }, { status: 403 });
+    }
+  }
 
-    // 1. Fetch Product and validate server-side state
+  // 3. IP + User Rate Limiting (10 requests per minute)
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown_ip";
+  const rateKey = `purchase:${session.user.id}:${clientIp}`;
+  const rate = checkRateLimit(rateKey, { maxRequests: 10, windowSeconds: 60 });
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: "Too many purchase attempts. Please wait a moment before trying again." },
+      { status: 429 }
+    );
+  }
+
+  // 4. Strict Header Idempotency-Key Enforcement
+  const rawIdempotencyKey = req.headers.get("Idempotency-Key")?.trim();
+  if (!rawIdempotencyKey) {
+    return NextResponse.json(
+      { error: "Idempotency-Key header is required for purchase transactions." },
+      { status: 400 }
+    );
+  }
+
+  if (!IDEMPOTENCY_KEY_REGEX.test(rawIdempotencyKey)) {
+    return NextResponse.json(
+      { error: "Invalid Idempotency-Key format. Must be 8-128 alphanumeric characters, underscores, or hyphens." },
+      { status: 400 }
+    );
+  }
+
+  try {
+    // 5. Request body parsing & size validation (< 10KB)
+    const rawBodyText = await req.text();
+    if (rawBodyText.length > 10240) {
+      return NextResponse.json({ error: "Request payload too large." }, { status: 413 });
+    }
+
+    const body = JSON.parse(rawBodyText || "{}");
+    const { productId } = purchaseSchema.parse(body);
+
+    // 6. Check prior purchase by Idempotency-Key (Idempotent response)
+    const existingByIdempotency = await db
+      .select()
+      .from(productPurchases)
+      .where(
+        and(
+          eq(productPurchases.buyerId, session.user.id),
+          eq(productPurchases.idempotencyKey, rawIdempotencyKey)
+        )
+      )
+      .limit(1);
+
+    if (existingByIdempotency.length > 0) {
+      const priorEnt = existingByIdempotency[0];
+      const prod = (
+        await db.select().from(products).where(eq(products.id, priorEnt.productId)).limit(1)
+      )[0];
+
+      return NextResponse.json({
+        success: true,
+        isIdempotentReplay: true,
+        entitlementId: priorEnt.id,
+        githubReleaseUrl: prod?.githubReleaseUrl || "",
+        message: "Previous transaction confirmed. No additional credits deducted.",
+      });
+    }
+
+    // 7. Validate Product from Database
     const product = (
       await db.select().from(products).where(eq(products.id, productId)).limit(1)
     )[0];
@@ -37,12 +110,12 @@ export async function POST(req: NextRequest) {
     }
 
     const tokenPrice = Number(product.tokenPrice);
-    if (isNaN(tokenPrice) || tokenPrice < 0) {
-      return NextResponse.json({ error: "Invalid product pricing configuration." }, { status: 400 });
+    if (!Number.isSafeInteger(tokenPrice) || tokenPrice <= 0 || tokenPrice > 1000000) {
+      return NextResponse.json({ error: "Invalid product pricing configuration in catalog." }, { status: 400 });
     }
 
-    // 2. Check existing active entitlement (Race condition prevention & Idempotency)
-    const existingEntitlements = await db
+    // 8. Prevent duplicate active entitlement (Concurrency & Race Condition check)
+    const existingActiveEntitlement = await db
       .select()
       .from(productPurchases)
       .where(
@@ -54,18 +127,17 @@ export async function POST(req: NextRequest) {
       )
       .limit(1);
 
-    if (existingEntitlements.length > 0) {
-      const activeEnt = existingEntitlements[0];
+    if (existingActiveEntitlement.length > 0) {
       return NextResponse.json({
         success: true,
         isExisting: true,
-        entitlementId: activeEnt.id,
+        entitlementId: existingActiveEntitlement[0].id,
         githubReleaseUrl: product.githubReleaseUrl,
         message: "You already hold an active entitlement for this digital asset.",
       });
     }
 
-    // 3. Verify Buyer Wallet Balance
+    // 9. Check Buyer Wallet Balance
     const buyerWallet = await getUserWallet(session.user.id);
     if (!buyerWallet || buyerWallet.balance < tokenPrice) {
       return NextResponse.json(
@@ -74,23 +146,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Deterministic Idempotency Key
-    const normalizedKey = clientKey
-      ? `pur_cli_${session.user.id}_${productId}_${clientKey}`
-      : `pur_auto_${session.user.id}_${productId}_${nanoid(16)}`;
-
-    // 5. Atomic Debit & Entitlement Allocation
+    // 10. Atomic Purchase Execution
     const purchaseId = `ent_${nanoid(16)}`;
     const entitlementKey = `VALAX-ENT-${nanoid(6).toUpperCase()}-${nanoid(6).toUpperCase()}`;
 
-    // Debit Buyer
+    // Step A: Debit Buyer Ledger
     const debitResult = await executeLedgerTransaction({
       userId: session.user.id,
       amount: -tokenPrice,
       type: "purchase_product",
       source: "Marketplace Purchase",
       referenceId: productId,
-      idempotencyKey: normalizedKey,
+      idempotencyKey: `ledger_${rawIdempotencyKey}`,
       notes: `Purchase Entitlement: ${product.title}`,
     });
 
@@ -98,30 +165,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: debitResult.error || "Credit transaction failed." }, { status: 400 });
     }
 
-    // Insert Entitlement Record
-    await db.insert(productPurchases).values({
-      id: purchaseId,
-      productId: product.id,
-      buyerId: session.user.id,
-      tokensSpent: tokenPrice,
-      licenseKey: entitlementKey,
-      status: "active",
-    });
+    // Step B: Insert Entitlement with Idempotency Key
+    try {
+      await db.insert(productPurchases).values({
+        id: purchaseId,
+        productId: product.id,
+        buyerId: session.user.id,
+        tokensSpent: tokenPrice,
+        licenseKey: entitlementKey,
+        idempotencyKey: rawIdempotencyKey,
+        status: "active",
+      });
+    } catch (insertErr: any) {
+      // Compensate / Rollback credit deduction if duplicate active constraint triggered
+      await executeLedgerTransaction({
+        userId: session.user.id,
+        amount: tokenPrice,
+        type: "admin_adjustment",
+        source: "Purchase Rollback / Compensation",
+        referenceId: productId,
+        idempotencyKey: `rollback_${rawIdempotencyKey}`,
+        notes: `Rollback duplicate purchase for: ${product.title}`,
+      });
+      return NextResponse.json(
+        { error: "Conflict: Concurrent purchase already in progress or completed." },
+        { status: 409 }
+      );
+    }
 
-    // Increment sales count
+    // Step C: Increment Sales Counter
     await db
       .update(products)
       .set({ salesCount: sql`${products.salesCount} + 1` })
       .where(eq(products.id, product.id));
 
-    // Audit log
+    // Step D: Write Audit Log
     await db.insert(auditLogs).values({
       id: `aud_${nanoid(16)}`,
       operatorId: session.user.id,
       action: "MARKET_PURCHASE",
       targetType: "product",
       targetId: product.id,
-      details: JSON.stringify({ purchaseId, tokensSpent: tokenPrice }),
+      details: JSON.stringify({ purchaseId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
     });
 
     return NextResponse.json({

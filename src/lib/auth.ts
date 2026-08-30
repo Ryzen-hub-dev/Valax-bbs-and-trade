@@ -4,7 +4,15 @@ import { db } from "@/db";
 import { users, sessions } from "@/db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import crypto from "crypto";
 import { getSafeOAuthCallbackBase } from "@/config/origins";
+
+/**
+ * Hashes a raw session token with SHA-256 for secure database storage.
+ */
+export function hashSessionToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 /**
  * Returns a configured Discord OAuth client.
@@ -35,11 +43,13 @@ export interface UserSession {
 
 export async function getCurrentSession(): Promise<UserSession | null> {
   const cookieStore = cookies();
-  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return null;
+  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (!rawToken) return null;
 
   try {
+    const tokenHash = hashSessionToken(rawToken);
     const now = new Date();
+
     const result = await db
       .select({
         user: users,
@@ -47,7 +57,7 @@ export async function getCurrentSession(): Promise<UserSession | null> {
       })
       .from(sessions)
       .innerJoin(users, eq(sessions.userId, users.id))
-      .where(and(eq(sessions.id, token), gt(sessions.expiresAt, now)))
+      .where(and(eq(sessions.id, tokenHash), gt(sessions.expiresAt, now)))
       .limit(1);
 
     if (result.length === 0) {
@@ -56,8 +66,8 @@ export async function getCurrentSession(): Promise<UserSession | null> {
 
     const { user, session } = result[0];
 
-    // Block banned users
-    if (user.isBanned) {
+    // Block banned or soft-deleted users
+    if (user.isBanned || user.deletedAt) {
       return null;
     }
 
@@ -69,23 +79,24 @@ export async function getCurrentSession(): Promise<UserSession | null> {
 }
 
 export async function createSession(userId: string, userAgent?: string, ipAddress?: string): Promise<string> {
-  const token = nanoid(48);
+  const rawToken = nanoid(48);
+  const tokenHash = hashSessionToken(rawToken);
   const expiresAt = new Date(Date.now() + SESSION_EXPIRY_SECONDS * 1000);
 
   await db.insert(sessions).values({
-    id: token,
+    id: tokenHash,
     userId,
     expiresAt,
     userAgent: userAgent ? userAgent.slice(0, 500) : null,
     ipAddress: ipAddress ? ipAddress.slice(0, 100) : null,
   });
 
-  return token;
+  return rawToken;
 }
 
-export async function setSessionCookie(token: string) {
+export async function setSessionCookie(rawToken: string) {
   const cookieStore = cookies();
-  cookieStore.set(SESSION_COOKIE_NAME, token, {
+  cookieStore.set(SESSION_COOKIE_NAME, rawToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -96,10 +107,11 @@ export async function setSessionCookie(token: string) {
 
 export async function clearSessionCookie() {
   const cookieStore = cookies();
-  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (token) {
+  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (rawToken) {
     try {
-      await db.delete(sessions).where(eq(sessions.id, token));
+      const tokenHash = hashSessionToken(rawToken);
+      await db.delete(sessions).where(eq(sessions.id, tokenHash));
     } catch {}
   }
   cookieStore.delete(SESSION_COOKIE_NAME);

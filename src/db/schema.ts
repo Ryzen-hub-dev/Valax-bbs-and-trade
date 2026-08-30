@@ -14,6 +14,7 @@ export const users = sqliteTable("users", {
   mutedUntil: integer("muted_until", { mode: "timestamp" }),
   banReason: text("ban_reason"),
   reputationScore: integer("reputation_score").default(0).notNull(),
+  deletedAt: integer("deleted_at", { mode: "timestamp" }), // Soft delete support
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
   lastLoginAt: integer("last_login_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
 }, (table) => ({
@@ -21,9 +22,9 @@ export const users = sqliteTable("users", {
   roleIdx: index("users_role_idx").on(table.role),
 }));
 
-// 2. User Sessions (Revocable)
+// 2. User Sessions (Revocable, SHA-256 Hashed Token ID)
 export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(), // Nanoid(48)
+  id: text("id").primaryKey(), // SHA-256 hash of session token
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
@@ -37,7 +38,7 @@ export const sessions = sqliteTable("sessions", {
 // 3. Valax Utility Credit Wallet Accounts
 export const walletAccounts = sqliteTable("wallet_accounts", {
   id: text("id").primaryKey(),
-  userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: "restrict" }),
   balance: integer("balance").default(0).notNull(), // Non-financial utility credit balance
   frozenBalance: integer("frozen_balance").default(0).notNull(),
   version: integer("version").default(1).notNull(),
@@ -46,11 +47,11 @@ export const walletAccounts = sqliteTable("wallet_accounts", {
   userIdIdx: index("wallet_accounts_user_id_idx").on(table.userId),
 }));
 
-// 4. Immutable Double-Entry Wallet Ledger
+// 4. Immutable Double-Entry Wallet Ledger (NEVER CASCADE DELETED)
 export const walletLedger = sqliteTable("wallet_ledger", {
   id: text("id").primaryKey(),
-  accountId: text("account_id").notNull().references(() => walletAccounts.id, { onDelete: "cascade" }),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: text("account_id").notNull().references(() => walletAccounts.id, { onDelete: "restrict" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   amount: integer("amount").notNull(), // signed delta (+ / -)
   balanceBefore: integer("balance_before").notNull(),
   balanceAfter: integer("balance_after").notNull(),
@@ -58,7 +59,7 @@ export const walletLedger = sqliteTable("wallet_ledger", {
   source: text("source").notNull(),
   referenceId: text("reference_id"),
   idempotencyKey: text("idempotency_key").notNull().unique(),
-  operatorId: text("operator_id"), // Admin user ID if manual adjustment
+  operatorId: text("operator_id"),
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
 }, (table) => ({
@@ -91,7 +92,7 @@ export const forumThreads = sqliteTable("forum_threads", {
   title: text("title").notNull(),
   slug: text("slug").notNull().unique(),
   content: text("content").notNull(),
-  tags: text("tags").default("[]").notNull(), // JSON array string (backward-compatible cache)
+  tags: text("tags").default("[]").notNull(), // JSON array cache
   isPinned: integer("is_pinned", { mode: "boolean" }).default(false).notNull(),
   isHighlighted: integer("is_highlighted", { mode: "boolean" }).default(false).notNull(),
   isLocked: integer("is_locked", { mode: "boolean" }).default(false).notNull(),
@@ -182,7 +183,7 @@ export const products = sqliteTable("products", {
   slug: text("slug").notNull().unique(),
   shortDescription: text("short_description").notNull(),
   description: text("description").notNull(),
-  category: text("category").notNull(), // 'Scripts' | 'Templates' | 'Tools' | 'Services'
+  category: text("category").notNull(),
   tokenPrice: integer("token_price").notNull(), // Utility credits
   fiatPriceUsd: integer("fiat_price_usd").default(0).notNull(),
   currency: text("currency").default("USD").notNull(),
@@ -194,8 +195,8 @@ export const products = sqliteTable("products", {
   externalDemoUrl: text("external_demo_url"),
   documentationUrl: text("documentation_url"),
   previewImageUrl: text("preview_image_url"),
-  status: text("status", { enum: ["draft", "active", "archived"] }).default("active").notNull(),
-  moderationStatus: text("moderation_status", { enum: ["pending", "approved", "rejected"] }).default("approved").notNull(),
+  status: text("status", { enum: ["draft", "active", "archived"] }).default("draft").notNull(),
+  moderationStatus: text("moderation_status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
   moderationNote: text("moderation_note"),
   salesCount: integer("sales_count").default(0).notNull(),
   ratingAverage: real("rating_average").default(5.0).notNull(),
@@ -208,27 +209,28 @@ export const products = sqliteTable("products", {
   moderationStatusIdx: index("products_mod_status_idx").on(table.moderationStatus),
 }));
 
-// 13. Digital Product Purchases and Entitlements
+// 13. Digital Product Purchases and Entitlements (Financial Data Preserved)
 export const productPurchases = sqliteTable("product_purchases", {
   id: text("id").primaryKey(),
-  productId: text("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
-  buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  productId: text("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   tokensSpent: integer("tokens_spent").notNull(),
   licenseKey: text("license_key").notNull().unique(),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
   status: text("status", { enum: ["active", "revoked", "refunded"] }).default("active").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
   revokedAt: integer("revoked_at", { mode: "timestamp" }),
 }, (table) => ({
   productIdIdx: index("purchases_product_id_idx").on(table.productId),
   buyerIdIdx: index("purchases_buyer_id_idx").on(table.buyerId),
-  licenseKeyIdx: index("purchases_license_key_idx").on(table.licenseKey),
+  idempotencyKeyIdx: index("purchases_idempotency_key_idx").on(table.idempotencyKey),
   buyerProductStatusIdx: index("purchases_buyer_product_status_idx").on(table.buyerId, table.productId, table.status),
 }));
 
-// 14. PayPal Orders
+// 14. PayPal Orders (Financial Data Preserved)
 export const ordersPaypal = sqliteTable("orders_paypal", {
   id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   paypalOrderId: text("paypal_order_id").notNull().unique(),
   amountUsd: integer("amount_usd").notNull(), // cents
   creditsGranted: integer("credits_granted").notNull(),
@@ -250,7 +252,7 @@ export const reports = sqliteTable("reports", {
   reason: text("reason").notNull(),
   details: text("details"),
   status: text("status", { enum: ["pending", "resolved", "dismissed"] }).default("pending").notNull(),
-  handledBy: text("handled_by").references(() => users.id),
+  handledBy: text("handled_by").references(() => users.id, { onDelete: "set null" }),
   resolutionNote: text("resolution_note"),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
 }, (table) => ({
@@ -263,7 +265,7 @@ export const notifications = sqliteTable("notifications", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
-  type: text("type").notNull(), // 'reply' | 'solution' | 'entitlement' | 'system' | 'report_action'
+  type: text("type").notNull(),
   title: text("title").notNull(),
   content: text("content").notNull(),
   link: text("link"),
@@ -275,10 +277,10 @@ export const notifications = sqliteTable("notifications", {
   createdAtIdx: index("notifications_created_at_idx").on(table.createdAt),
 }));
 
-// 17. Immutable Audit Logs
+// 17. Immutable Audit Logs (Never deleted on user removal)
 export const auditLogs = sqliteTable("audit_logs", {
   id: text("id").primaryKey(),
-  operatorId: text("operator_id").notNull().references(() => users.id),
+  operatorId: text("operator_id").references(() => users.id, { onDelete: "set null" }),
   action: text("action").notNull(),
   targetType: text("target_type").notNull(),
   targetId: text("target_id").notNull(),
