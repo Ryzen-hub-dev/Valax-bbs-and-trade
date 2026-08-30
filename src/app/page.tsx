@@ -3,8 +3,8 @@ import { db } from "@/db";
 import { forumThreads, products, users, forumBoards } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { MessageSquare, ShoppingBag, Coins, Sparkles, Code2, Award, ShieldCheck, ArrowRight, Lock, KeyRound, CheckCircle2, Flame, ExternalLink, Activity, Users, Shield } from "lucide-react";
-import { HeroNarrative } from "@/components/home/HeroNarrative";
-import { ProductPreviewShowcase } from "@/components/home/ProductPreviewShowcase";
+import { HeroStage } from "@/components/home/HeroStage";
+import { ProductStorySection } from "@/components/home/ProductStorySection";
 import { MotionContainer } from "@/components/animations/MotionContainer";
 
 export const dynamic = "force-dynamic";
@@ -58,94 +58,35 @@ export default async function RootPortalPage() {
   }
 
   return (
-    <div className="space-y-20 py-4">
-      {/* 1. Hero Narrative */}
-      <HeroNarrative />
+    <div className="space-y-24 py-4">
+      {/* 1. Asymmetric Hero Stage */}
+      <HeroStage />
 
-      {/* 2. Product Narrative Pillars */}
-      <section className="space-y-8">
-        <div className="text-center max-w-2xl mx-auto space-y-3">
-          <span className="badge-cyan text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-            Architecture & Philosophy
-          </span>
-          <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
-            Built from the Ground Up for Developer Trust
-          </h2>
-          <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed font-normal">
-            Every layer of Valax BBS & Trade is designed for cryptographic transparency, strict security isolation, and immutable auditability.
-          </p>
-        </div>
+      {/* 2. Four-Pillar Product Storytelling Section */}
+      <ProductStorySection />
 
-        <MotionContainer direction="up" stagger={0.08} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
-            <div className="h-10 w-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <MessageSquare className="h-5 w-5" />
-            </div>
-            <h3 className="text-sm font-bold text-white tracking-tight">Technical BBS Forum</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-              High-signal RFC discussions, architecture reviews, and developer collaboration with syntax-highlighted code blocks.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
-            <div className="h-10 w-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-glow-cyan">
-              <Code2 className="h-5 w-5" />
-            </div>
-            <h3 className="text-sm font-bold text-white tracking-tight">Verified External Delivery</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-              Direct binary uploads are permanently blocked. Software packages distribute exclusively through audited GitHub Releases.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
-            <div className="h-10 w-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
-              <Coins className="h-5 w-5" />
-            </div>
-            <h3 className="text-sm font-bold text-white tracking-tight">Utility Credit Dual Ledger</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-              Double-entry accounting with LibSQL atomic rollback states, preventing concurrency race conditions or double deductions.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl glass-card space-y-3 hover:-translate-y-1 transition-all duration-300">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <KeyRound className="h-5 w-5" />
-            </div>
-            <h3 className="text-sm font-bold text-white tracking-tight">Discord Identity & Session Guard</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-              Passwordless OAuth authentication with 128-bit publicSessionId isolation for instant multi-device remote revocation.
-            </p>
-          </div>
-        </MotionContainer>
-      </section>
-
-      {/* 3. Interactive Product Preview Showcase */}
-      <section className="space-y-4">
-        <ProductPreviewShowcase />
-      </section>
-
-      {/* 4. Real Community Discussions */}
+      {/* 3. Active Community Discussions Feed */}
       <section className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-white/[0.06]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.06]">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <Flame className="h-4 w-4 text-amber-400" />
-              <h2 className="text-lg font-bold text-white tracking-tight">Active Community Discussions</h2>
+              <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">Active Community Discussions</h2>
             </div>
-            <p className="text-xs text-neutral-400">Real-time technical threads and developer proposals</p>
+            <p className="text-xs text-neutral-400">Live technical discussions and developer architecture proposals from the BBS</p>
           </div>
 
           <Link
             href="/bbs"
-            className="text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors"
+            className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors"
           >
-            <span>View All Topics</span>
+            <span>Explore All Discussions</span>
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
         {hotThreads.length === 0 ? (
-          <div className="p-12 text-center rounded-2xl glass-card text-neutral-400 space-y-3">
+          <div className="p-12 text-center rounded-3xl border border-white/[0.06] bg-obsidian-950/60 text-neutral-400 space-y-3">
             <MessageSquare className="h-8 w-8 text-neutral-600 mx-auto" />
             <p className="text-xs">No active discussions currently listed. Be the first to start a conversation!</p>
             <Link
@@ -161,14 +102,14 @@ export default async function RootPortalPage() {
               <Link
                 key={t.id}
                 href={`/bbs/thread/${t.slug}`}
-                className="p-6 rounded-2xl glass-card hover:border-amber-400/40 transition-all group flex flex-col justify-between"
+                className="p-6 rounded-2xl border border-white/[0.06] bg-obsidian-950/70 hover:border-amber-400/40 transition-all group flex flex-col justify-between hover:-translate-y-0.5"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="badge-cyan text-[10px] font-bold px-2 py-0.5 rounded-full">
                       {t.board?.name || "General"}
                     </span>
-                    <span className="text-[11px] text-neutral-400">
+                    <span className="text-[11px] text-neutral-400 font-mono">
                       {new Date(t.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </span>
                   </div>
@@ -177,9 +118,9 @@ export default async function RootPortalPage() {
                   </h3>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-white/[0.04] flex items-center justify-between text-[11px] text-neutral-400">
-                  <span>Author: <strong className="text-neutral-300 font-semibold">{t.author?.username || "Developer"}</strong></span>
-                  <div className="flex items-center gap-3">
+                <div className="mt-5 pt-3 border-t border-white/[0.04] flex items-center justify-between text-[11px] text-neutral-400">
+                  <span>By <strong className="text-neutral-300 font-semibold">{t.author?.username || "Developer"}</strong></span>
+                  <div className="flex items-center gap-3 font-mono text-[10px]">
                     <span>{t.likesCount} Likes</span>
                     <span>{t.repliesCount} Replies</span>
                   </div>
@@ -190,30 +131,30 @@ export default async function RootPortalPage() {
         )}
       </section>
 
-      {/* 5. Verified Digital Releases */}
+      {/* 4. Verified Releases Catalog */}
       <section className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-white/[0.06]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.06]">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <ShoppingBag className="h-4 w-4 text-cyan-400" />
-              <h2 className="text-lg font-bold text-white tracking-tight">Verified Developer Releases</h2>
+              <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">Verified Developer Releases</h2>
             </div>
-            <p className="text-xs text-neutral-400">Audited scripts, tooling, and developer templates</p>
+            <p className="text-xs text-neutral-400">Audited utilities, automation scripts, and templates delivered via GitHub Releases</p>
           </div>
 
           <Link
             href="/market"
-            className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+            className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 transition-colors"
           >
-            <span>Explore Marketplace</span>
+            <span>View All Releases</span>
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
         {featuredProducts.length === 0 ? (
-          <div className="p-12 text-center rounded-2xl glass-card text-neutral-400 space-y-3">
+          <div className="p-12 text-center rounded-3xl border border-white/[0.06] bg-obsidian-950/60 text-neutral-400 space-y-3">
             <ShoppingBag className="h-8 w-8 text-neutral-600 mx-auto" />
-            <p className="text-xs">No products currently published. Click below to submit an asset for review!</p>
+            <p className="text-xs">Awaiting verified releases. Click below to submit a tool for review!</p>
             <Link
               href="/market/publish"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl badge-cyan text-xs font-bold"
@@ -226,7 +167,7 @@ export default async function RootPortalPage() {
             {featuredProducts.map((p) => (
               <div
                 key={p.id}
-                className="p-6 rounded-2xl glass-card hover:border-cyan-400/40 transition-all flex flex-col justify-between group"
+                className="p-6 rounded-2xl border border-white/[0.06] bg-obsidian-950/70 hover:border-cyan-400/40 transition-all flex flex-col justify-between group hover:-translate-y-0.5"
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -256,7 +197,7 @@ export default async function RootPortalPage() {
                     href={`/market/${p.slug}`}
                     className="text-[11px] text-neutral-400 hover:text-white font-medium flex items-center gap-1"
                   >
-                    <span>View</span>
+                    <span>Details</span>
                     <ArrowRight className="h-3 w-3" />
                   </Link>
                 </div>
@@ -266,40 +207,40 @@ export default async function RootPortalPage() {
         )}
       </section>
 
-      {/* 6. Utility Credits & Governance Policy */}
+      {/* 5. Compliance & Trust Policy Section */}
       <section className="rounded-3xl border border-white/[0.08] bg-obsidian-950/90 p-8 sm:p-12 space-y-6">
         <div className="flex items-center gap-2.5">
           <ShieldCheck className="h-5 w-5 text-emerald-400" />
-          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
-            Governance & Non-Financial Utility Credits
+          <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
+            Governance, Zero-Upload & Non-Financial Utility Credits
           </h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-neutral-400 leading-relaxed">
-          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900 border border-white/[0.04]">
-            <h4 className="font-bold text-neutral-200 text-sm">Non-Financial Utility</h4>
+          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900/80 border border-white/[0.04]">
+            <h4 className="font-bold text-neutral-200 text-sm">Non-Financial Utility Credits</h4>
             <p>
-              Valax Credits are internal functional credits designed solely for software licensing, developer tooling access, and forum features. They are not investments, securities, or convertible currency.
+              Valax Credits are internal functional utility tokens designed exclusively for software licensing, tool authorizations, and forum recognition. They are not securities, investments, or yield instruments.
             </p>
           </div>
 
-          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900 border border-white/[0.04]">
-            <h4 className="font-bold text-neutral-200 text-sm">Strict Zero-Upload Policy</h4>
+          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900/80 border border-white/[0.04]">
+            <h4 className="font-bold text-neutral-200 text-sm">Zero Server-Hosted Executables</h4>
             <p>
-              The platform never hosts or serves user binary executables. All distributed assets are verified external GitHub Release tags, safeguarding the ecosystem against untrusted server storage.
+              The platform strictly forbids local server binary hosting. All distributed assets link to authenticated GitHub Releases with verified checksums, eliminating untrusted storage risks.
             </p>
           </div>
 
-          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900 border border-white/[0.04]">
-            <h4 className="font-bold text-neutral-200 text-sm">Fail-Closed Admin Safeguards</h4>
+          <div className="space-y-2 p-5 rounded-2xl bg-obsidian-900/80 border border-white/[0.04]">
+            <h4 className="font-bold text-neutral-200 text-sm">Fail-Closed Admin Governance</h4>
             <p>
-              High-risk transaction pathways, ledger adjustments, and payments remain strictly guarded by server-side feature flags, defaulting to closed on any database read interruption.
+              High-risk transaction pathways, purchases, payments, and admin adjustments remain guarded by server-side feature flags, defaulting to closed on any database interruption.
             </p>
           </div>
         </div>
       </section>
 
-      {/* 7. Final Action CTA */}
+      {/* 6. Final Conversion Call-to-Action */}
       <section className="relative overflow-hidden rounded-3xl border border-amber-500/30 bg-gradient-to-r from-obsidian-900 via-obsidian-950 to-obsidian-900 p-8 sm:p-14 text-center space-y-6 shadow-glow-gold">
         <div className="max-w-xl mx-auto space-y-3">
           <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
