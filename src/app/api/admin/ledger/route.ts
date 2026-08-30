@@ -1,9 +1,11 @@
 import { db } from "@/db";
-import { walletLedger, auditLogs } from "@/db/schema";
+import { walletLedger, walletAccounts, auditLogs } from "@/db/schema";
 import { requireAdmin } from "@/lib/rbac";
-import { executeLedgerTransaction } from "@/lib/ledger";
+import { executeLedgerTransaction, getUserWallet } from "@/lib/ledger";
+import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError, generateRequestId } from "@/lib/errors";
+import { createHash } from "crypto";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
@@ -14,8 +16,8 @@ export const dynamic = "force-dynamic";
 
 const ledgerAdjustSchema = z.object({
   targetUserId: z.string().min(1),
-  amount: z.number().int().refine((val) => Number.isSafeInteger(val) && val !== 0, {
-    message: "Adjustment amount must be a non-zero whole integer.",
+  amount: z.number().int().refine((val) => Number.isSafeInteger(val) && val !== 0 && Math.abs(val) <= 1000000, {
+    message: "Adjustment amount must be a non-zero whole integer with an absolute maximum of 1,000,000 credits.",
   }),
   reason: z.string().min(5).max(500),
   confirmationCode: z.string().min(1),
@@ -25,11 +27,25 @@ const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_-]{8,128}$/;
 
 export async function POST(req: NextRequest) {
   try {
-    const adminUser = await requireAdmin();
+    const adminUser = await requireAdmin(req);
 
     const csrf = validateCsrfOrigin(req);
     if (!csrf.isValid) {
       return csrf.errorResponse!;
+    }
+
+    // Fail-closed rate limiting on administrative financial operations
+    const clientIp = getClientIp(req);
+    const rate = await checkRateLimitAsync(`admin_ledger:${adminUser.id}:${clientIp}`, {
+      maxRequests: 10,
+      windowSeconds: 60,
+      failClosed: true,
+    });
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Too many ledger adjustment attempts. Please wait a moment." },
+        { status: 429 }
+      );
     }
 
     const rawIdempotencyKey = req.headers.get("Idempotency-Key")?.trim();
@@ -52,21 +68,37 @@ export async function POST(req: NextRequest) {
 
     if (confirmationCode !== "CONFIRM_VALAX_ADJUST") {
       return NextResponse.json(
-        { error: "Invalid double-confirmation code. Type CONFIRM_VALAX_ADJUST to proceed." },
+        { error: "Invalid confirmation phrase. Type CONFIRM_VALAX_ADJUST to proceed." },
         { status: 400 }
       );
     }
 
-    // 1. Idempotency Replay Check
+    // Compute cryptographic request fingerprint to detect key reuse conflicts
+    const normalizedReason = reason.trim().toLowerCase();
+    const requestFingerprint = createHash("sha256")
+      .update(`${adminUser.id}:${targetUserId}:${amount}:${normalizedReason}`)
+      .digest("hex");
+
+    const namespacedLedgerKey = `admin_adjust_${adminUser.id}_${rawIdempotencyKey}`;
+
+    // 1. Idempotency Check
     const existingEntry = (
       await db
         .select()
         .from(walletLedger)
-        .where(eq(walletLedger.idempotencyKey, rawIdempotencyKey))
+        .where(eq(walletLedger.idempotencyKey, namespacedLedgerKey))
         .limit(1)
     )[0];
 
     if (existingEntry) {
+      // Verify if previous request had identical parameters
+      if (existingEntry.userId !== targetUserId || existingEntry.amount !== amount) {
+        return NextResponse.json(
+          { error: "Idempotency conflict: This Idempotency-Key was previously used with different adjustment parameters." },
+          { status: 409 }
+        );
+      }
+
       return NextResponse.json({
         success: true,
         isIdempotentReplay: true,
@@ -74,6 +106,20 @@ export async function POST(req: NextRequest) {
         newBalance: existingEntry.balanceAfter,
         message: "Previous adjustment confirmed. No additional credits modified.",
       });
+    }
+
+    // 2. Target Wallet Validation & Negative Balance Prevention
+    const targetWallet = await getUserWallet(targetUserId);
+    if (!targetWallet) {
+      return NextResponse.json({ error: "Target user wallet account does not exist." }, { status: 404 });
+    }
+
+    const projectedBalance = targetWallet.balance + amount;
+    if (projectedBalance < 0) {
+      return NextResponse.json(
+        { error: `Adjustment would result in a negative wallet balance (Current: ${targetWallet.balance}, Requested: ${amount}).` },
+        { status: 400 }
+      );
     }
 
     const requestId = generateRequestId();
@@ -84,7 +130,7 @@ export async function POST(req: NextRequest) {
       type: "admin_adjustment",
       source: `Admin Manual Adjustment by ${adminUser.username}`,
       operatorId: adminUser.id,
-      idempotencyKey: rawIdempotencyKey,
+      idempotencyKey: namespacedLedgerKey,
       notes: reason,
     });
 
@@ -100,8 +146,11 @@ export async function POST(req: NextRequest) {
       targetId: targetUserId,
       details: JSON.stringify({
         idempotencyKey: rawIdempotencyKey,
+        fingerprint: requestFingerprint,
         amount,
         reason,
+        balanceBefore: targetWallet.balance,
+        balanceAfter: result.newBalance,
         requestId,
       }),
     });
@@ -112,6 +161,6 @@ export async function POST(req: NextRequest) {
       requestId,
     });
   } catch (err: any) {
-    return handleApiError(err, { publicMessage: "Ledger manual adjustment failed." });
+    return handleApiError(err, { publicMessage: "Ledger manual adjustment failed.", route: "/api/admin/ledger" });
   }
 }

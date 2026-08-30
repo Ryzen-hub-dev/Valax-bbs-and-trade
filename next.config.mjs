@@ -2,9 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: false,
   },
@@ -13,7 +10,9 @@ const nextConfig = {
       { protocol: "https", hostname: "cdn.discordapp.com" },
       { protocol: "https", hostname: "github.com" },
       { protocol: "https", hostname: "raw.githubusercontent.com" },
-      { protocol: "https", hostname: "avatars.githubusercontent.com" }
+      { protocol: "https", hostname: "avatars.githubusercontent.com" },
+      { protocol: "https", hostname: "i.imgur.com" },
+      { protocol: "https", hostname: "images.unsplash.com" }
     ],
   },
   // Vercel Serverless Security headers

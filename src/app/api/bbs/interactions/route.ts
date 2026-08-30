@@ -18,7 +18,7 @@ const interactionSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getCurrentSession();
+  const session = await getCurrentSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }

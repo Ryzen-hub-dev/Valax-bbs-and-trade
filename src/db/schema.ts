@@ -209,7 +209,7 @@ export const products = sqliteTable("products", {
   moderationStatusIdx: index("products_mod_status_idx").on(table.moderationStatus),
 }));
 
-// 13. Marketplace Orders State Machine (Trackable lifecycle & failure compensation)
+// 13. Marketplace Orders State Machine (Trackable lifecycle, lease expiry & failure compensation)
 export const ordersMarket = sqliteTable("orders_market", {
   id: text("id").primaryKey(),
   buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
@@ -220,6 +220,11 @@ export const ordersMarket = sqliteTable("orders_market", {
   ledgerReference: text("ledger_reference"),
   entitlementId: text("entitlement_id"),
   failureReason: text("failure_reason"),
+  processingStartedAt: integer("processing_started_at", { mode: "timestamp" }),
+  leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp" }),
+  retryCount: integer("retry_count").default(0).notNull(),
+  lastError: text("last_error"),
+  recoveryRequired: integer("recovery_required", { mode: "boolean" }).default(false).notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
 }, (table) => ({
@@ -227,6 +232,7 @@ export const ordersMarket = sqliteTable("orders_market", {
   buyerIdIdx: index("orders_market_buyer_id_idx").on(table.buyerId),
   productIdIdx: index("orders_market_product_id_idx").on(table.productId),
   statusIdx: index("orders_market_status_idx").on(table.status),
+  recoveryIdx: index("orders_market_recovery_idx").on(table.recoveryRequired),
 }));
 
 // 14. Digital Product Purchases and Entitlements (Financial Data Preserved, User+Idempotency Unique)

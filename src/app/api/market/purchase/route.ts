@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { products, productPurchases, ordersMarket, auditLogs } from "@/db/schema";
+import { products, productPurchases, ordersMarket, walletLedger, auditLogs } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
 import { getUserWallet, executeLedgerTransaction } from "@/lib/ledger";
 import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
@@ -18,10 +18,11 @@ const purchaseSchema = z.object({
 });
 
 const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_-]{8,128}$/;
+const LEASE_DURATION_MS = 30000; // 30 seconds processing lease
 
 export async function POST(req: NextRequest) {
   // 1. Authenticate Session
-  const session = await getCurrentSession();
+  const session = await getCurrentSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }
@@ -32,10 +33,10 @@ export async function POST(req: NextRequest) {
     return csrf.errorResponse!;
   }
 
-  // 3. Distributed IP + User Rate Limiting
+  // 3. Distributed Rate Limiting (Fail-closed on financial mutations)
   const clientIp = getClientIp(req);
   const rateKey = `purchase:${session.user.id}:${clientIp}`;
-  const rate = await checkRateLimitAsync(rateKey, { maxRequests: 10, windowSeconds: 60 });
+  const rate = await checkRateLimitAsync(rateKey, { maxRequests: 10, windowSeconds: 60, failClosed: true });
   if (!rate.allowed) {
     return NextResponse.json(
       { error: "Too many purchase attempts. Please wait a moment before trying again." },
@@ -69,6 +70,8 @@ export async function POST(req: NextRequest) {
     const body = JSON.parse(rawBodyText || "{}");
     const { productId } = purchaseSchema.parse(body);
 
+    const now = Date.now();
+
     // 6. Check Order State Machine by (buyerId, idempotencyKey)
     const existingOrder = (
       await db
@@ -82,6 +85,8 @@ export async function POST(req: NextRequest) {
         )
         .limit(1)
     )[0];
+
+    let orderId = `ord_${nanoid(16)}`;
 
     if (existingOrder) {
       // Conflict check: Same Idempotency-Key reused for a different product
@@ -106,9 +111,9 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      if (existingOrder.status === "processing") {
+      if (existingOrder.status === "failed") {
         return NextResponse.json(
-          { error: "Order is currently being processed. Please check your inventory in a moment." },
+          { error: `Previous purchase attempt failed: ${existingOrder.failureReason || "Transaction rejected"}` },
           { status: 409 }
         );
       }
@@ -118,6 +123,95 @@ export async function POST(req: NextRequest) {
           { error: "Order is flagged for manual review by platform administration." },
           { status: 422 }
         );
+      }
+
+      if (existingOrder.status === "processing") {
+        const isLeaseActive = existingOrder.leaseExpiresAt && existingOrder.leaseExpiresAt.getTime() > now;
+        if (isLeaseActive) {
+          return NextResponse.json(
+            { error: "Order is actively being processed under lease. Please retry in a few seconds." },
+            { status: 409 }
+          );
+        }
+
+        // LEASE EXPIRED RECONCILIATION
+        console.warn(`[Order Reconciliation] Lease expired for order ${existingOrder.id}. Reconciling ledger and entitlement...`);
+        const ledgerKey = `ledger_${rawIdempotencyKey}`;
+        const existingLedger = (
+          await db.select().from(walletLedger).where(eq(walletLedger.idempotencyKey, ledgerKey)).limit(1)
+        )[0];
+
+        const existingEntitlement = (
+          await db.select().from(productPurchases).where(
+            and(
+              eq(productPurchases.buyerId, session.user.id),
+              eq(productPurchases.idempotencyKey, rawIdempotencyKey)
+            )
+          ).limit(1)
+        )[0];
+
+        if (existingLedger && existingEntitlement) {
+          // Reconcile -> Completed
+          await db.update(ordersMarket).set({
+            status: "completed",
+            entitlementId: existingEntitlement.id,
+            ledgerReference: ledgerKey,
+            updatedAt: new Date(),
+          }).where(eq(ordersMarket.id, existingOrder.id));
+
+          const prod = (await db.select().from(products).where(eq(products.id, productId)).limit(1))[0];
+          return NextResponse.json({
+            success: true,
+            isIdempotentReplay: true,
+            entitlementId: existingEntitlement.id,
+            githubReleaseUrl: prod?.githubReleaseUrl || "",
+            message: "Transaction recovered and confirmed.",
+          });
+        } else if (existingLedger && !existingEntitlement) {
+          // Debited but no entitlement -> Execute compensation refund
+          const refundRes = await executeLedgerTransaction({
+            userId: session.user.id,
+            amount: existingOrder.amount,
+            type: "admin_adjustment",
+            source: "Crash Recovery Refund",
+            referenceId: productId,
+            idempotencyKey: `recovery_refund_${rawIdempotencyKey}`,
+            notes: "Automatic refund for unfulfilled expired order",
+          });
+
+          if (refundRes.success) {
+            await db.update(ordersMarket).set({
+              status: "failed",
+              failureReason: "Crash recovered: unfulfilled order was refunded.",
+              updatedAt: new Date(),
+            }).where(eq(ordersMarket.id, existingOrder.id));
+
+            return NextResponse.json(
+              { error: "Previous unfulfilled order has been automatically refunded. Please retry your purchase." },
+              { status: 409 }
+            );
+          } else {
+            await db.update(ordersMarket).set({
+              status: "manual_review",
+              recoveryRequired: true,
+              failureReason: "CRITICAL: Expired order refund failed during crash reconciliation.",
+              updatedAt: new Date(),
+            }).where(eq(ordersMarket.id, existingOrder.id));
+
+            return NextResponse.json(
+              { error: "Order recovery exception. Flagged for manual review." },
+              { status: 500 }
+            );
+          }
+        } else {
+          // Never debited -> Refresh lease and proceed
+          orderId = existingOrder.id;
+          await db.update(ordersMarket).set({
+            leaseExpiresAt: new Date(now + LEASE_DURATION_MS),
+            retryCount: sql`${ordersMarket.retryCount} + 1`,
+            updatedAt: new Date(),
+          }).where(eq(ordersMarket.id, existingOrder.id));
+        }
       }
     }
 
@@ -171,16 +265,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 10. Execute State Machine Transition -> 'processing'
-    const orderId = `ord_${nanoid(16)}`;
-    await db.insert(ordersMarket).values({
-      id: orderId,
-      buyerId: session.user.id,
-      productId: product.id,
-      idempotencyKey: rawIdempotencyKey,
-      amount: tokenPrice,
-      status: "processing",
-    });
+    // 10. Execute State Machine Transition -> 'processing' with Active Lease
+    if (!existingOrder) {
+      await db.insert(ordersMarket).values({
+        id: orderId,
+        buyerId: session.user.id,
+        productId: product.id,
+        idempotencyKey: rawIdempotencyKey,
+        amount: tokenPrice,
+        status: "processing",
+        processingStartedAt: new Date(now),
+        leaseExpiresAt: new Date(now + LEASE_DURATION_MS),
+      });
+    }
 
     // Step A: Debit Buyer Ledger
     const debitResult = await executeLedgerTransaction({
@@ -248,7 +345,7 @@ export async function POST(req: NextRequest) {
         // Critical: Refund also failed -> Escalate to manual review
         await db
           .update(ordersMarket)
-          .set({ status: "manual_review", failureReason: "CRITICAL: Entitlement failed and compensation refund failed.", updatedAt: new Date() })
+          .set({ status: "manual_review", recoveryRequired: true, failureReason: "CRITICAL: Entitlement failed and compensation refund failed.", updatedAt: new Date() })
           .where(eq(ordersMarket.id, orderId));
 
         await db.insert(auditLogs).values({
@@ -257,7 +354,7 @@ export async function POST(req: NextRequest) {
           action: "CRITICAL_MANUAL_REVIEW_REQUIRED",
           targetType: "orders_market",
           targetId: orderId,
-          details: JSON.stringify({ buyerId: session.user.id, tokenPrice, insertErr: insertErr?.message, refundErr: refundResult.error }),
+          details: JSON.stringify({ buyerId: session.user.id, tokenPrice }),
         });
 
         return NextResponse.json(
@@ -267,14 +364,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Step C: Increment Sales Counter (Non-blocking but logged)
+    // Step C: Increment Sales Counter (Non-blocking)
     try {
       await db
         .update(products)
         .set({ salesCount: sql`${products.salesCount} + 1` })
         .where(eq(products.id, product.id));
     } catch (salesErr) {
-      console.warn("[Purchase Warning] Sales count increment failed non-fatally:", salesErr);
+      console.warn("[Purchase Warning] Sales count increment failed non-fatally");
     }
 
     // Step D: Write Audit Log
@@ -288,7 +385,7 @@ export async function POST(req: NextRequest) {
         details: JSON.stringify({ purchaseId, orderId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
       });
     } catch (audErr) {
-      console.warn("[Purchase Warning] Audit log write failed non-fatally:", audErr);
+      console.warn("[Purchase Warning] Audit log write failed non-fatally");
     }
 
     // Step E: Complete State Machine Order Transition -> 'completed'
@@ -308,6 +405,6 @@ export async function POST(req: NextRequest) {
       githubReleaseUrl: product.githubReleaseUrl,
     });
   } catch (err: any) {
-    return handleApiError(err, { publicMessage: "Digital asset purchase could not be completed." });
+    return handleApiError(err, { publicMessage: "Digital asset purchase could not be completed.", route: "/api/market/purchase" });
   }
 }

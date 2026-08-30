@@ -6,19 +6,12 @@ import { eq, and, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import crypto from "crypto";
 import { getSafeOAuthCallbackBase } from "@/config/origins";
+import { NextRequest } from "next/server";
 
-/**
- * Hashes a raw session token with SHA-256 for secure database storage.
- */
 export function hashSessionToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-/**
- * Returns a configured Discord OAuth client.
- * Strictly requires DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET (fails closed if missing).
- * Uses allowlist-validated Origin for callback URL.
- */
 export function getDiscordClient(originCandidate?: string | null): Discord {
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
@@ -41,9 +34,22 @@ export interface UserSession {
   session: typeof sessions.$inferSelect;
 }
 
-export async function getCurrentSession(): Promise<UserSession | null> {
-  const cookieStore = cookies();
-  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+export async function getCurrentSession(req?: NextRequest): Promise<UserSession | null> {
+  let rawToken: string | undefined;
+
+  if (req) {
+    rawToken = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  }
+
+  if (!rawToken) {
+    try {
+      const cookieStore = cookies();
+      rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    } catch {
+      // In standalone execution without Next request store
+    }
+  }
+
   if (!rawToken) return null;
 
   try {
@@ -66,7 +72,6 @@ export async function getCurrentSession(): Promise<UserSession | null> {
 
     const { user, session } = result[0];
 
-    // Block banned or soft-deleted users
     if (user.isBanned || user.deletedAt) {
       return null;
     }
