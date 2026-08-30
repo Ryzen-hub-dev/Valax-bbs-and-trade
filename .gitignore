@@ -40,3 +40,7 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+# Backups and sensitive dumps (CRITICAL: NEVER COMMIT)
+backups/
+*.dump
+*.bak

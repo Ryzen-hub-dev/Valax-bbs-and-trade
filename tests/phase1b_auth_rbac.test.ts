@@ -1,3 +1,4 @@
+import { runMigrations } from "@/db/migrate";
 // Set isolated test environment flags BEFORE importing modules
 (process.env as any).NODE_ENV = "test";
 process.env.IS_TEST = "true";
