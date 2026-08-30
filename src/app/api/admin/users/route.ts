@@ -5,7 +5,7 @@ import { revokeAllUserSessions } from "@/lib/auth";
 import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError, generateRequestId } from "@/lib/errors";
 import { checkRateLimitAsync, getClientIp } from "@/lib/rate-limit";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Too many admin user requests. Please wait." }, { status: 429 });
     }
 
-    // 1. Prevent user from modifying their own role or banning themselves
+    // 1. Prevent administrator from modifying their own role or banning themselves
     if (targetUserId === operatorUser.id && (action === "set_role" || action === "ban")) {
       return NextResponse.json(
         { error: "Administrative protection: You cannot modify your own role or ban your own account." },
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Target user not found." }, { status: 404 });
     }
 
-    // 3. Last Admin Protection
+    // 3. Last Admin Protection with Confirmation Phrase Check
     if (targetUser.role === "admin" && (action === "ban" || (action === "set_role" && role !== "admin"))) {
       const isSoleAdmin = await isLastActiveAdmin(targetUserId);
       if (isSoleAdmin) {
@@ -110,7 +110,6 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Explicit confirmation check when modifying an admin
       if (confirmationCode !== "CONFIRM_ROLE_CHANGE") {
         return NextResponse.json(
           { error: "Modifying an administrator requires explicit confirmation. Please provide confirmationCode: 'CONFIRM_ROLE_CHANGE'." },
@@ -123,11 +122,27 @@ export async function POST(req: NextRequest) {
     let beforeState: any = { role: targetUser.role, isBanned: targetUser.isBanned, isMuted: targetUser.isMuted };
     let afterState: any = {};
 
+    // 4. Atomic conditional update with subquery guard for Last Admin concurrency safety
     if (action === "ban") {
-      await db
-        .update(users)
-        .set({ isBanned: true, banReason: reason || "Administrative suspension" })
-        .where(eq(users.id, targetUserId));
+      const updateResult = await db.run(sql`
+        UPDATE users
+        SET is_banned = 1,
+            ban_reason = ${reason || "Administrative suspension"}
+        WHERE id = ${targetUserId}
+          AND (
+            role != 'admin' OR (
+              SELECT count(*) FROM users WHERE role = 'admin' AND is_banned = 0 AND deleted_at IS NULL
+            ) > 1
+          );
+      `);
+
+      if (updateResult.rowsAffected === 0) {
+        return NextResponse.json(
+          { error: "Forbidden: Cannot ban the last remaining active administrator." },
+          { status: 400 }
+        );
+      }
+
       await revokeAllUserSessions(targetUserId);
       afterState = { isBanned: true, banReason: reason };
     } else if (action === "unban") {
@@ -140,7 +155,25 @@ export async function POST(req: NextRequest) {
       await db.update(users).set({ isMuted: false }).where(eq(users.id, targetUserId));
       afterState = { isMuted: false };
     } else if (action === "set_role" && role) {
-      await db.update(users).set({ role }).where(eq(users.id, targetUserId));
+      if (targetUser.role === "admin" && role !== "admin") {
+        const updateResult = await db.run(sql`
+          UPDATE users
+          SET role = ${role}
+          WHERE id = ${targetUserId}
+            AND (
+              SELECT count(*) FROM users WHERE role = 'admin' AND is_banned = 0 AND deleted_at IS NULL
+            ) > 1;
+        `);
+
+        if (updateResult.rowsAffected === 0) {
+          return NextResponse.json(
+            { error: "Forbidden: Cannot demote the last remaining active administrator." },
+            { status: 400 }
+          );
+        }
+      } else {
+        await db.update(users).set({ role }).where(eq(users.id, targetUserId));
+      }
       afterState = { role };
     } else if (action === "revoke_sessions") {
       await revokeAllUserSessions(targetUserId);

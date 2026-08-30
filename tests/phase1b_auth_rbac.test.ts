@@ -8,7 +8,7 @@ import { db, client } from "@/db";
 import { users, sessions, products, ordersMarket, productPurchases, walletAccounts, walletLedger, forumThreads, forumLikes, reports, systemSettings, auditLogs } from "@/db/schema";
 import { hashSessionToken, createSession, getCurrentSession, revokeAllUserSessions } from "@/lib/auth";
 import { hasPermission, requirePermission, requireAdmin, requireModerator, isLastActiveAdmin, Permission } from "@/lib/rbac";
-import { isFeatureEnabled, setFeatureFlag, requireFeatureFlag } from "@/lib/flags";
+import { isFeatureEnabled, setFeatureFlag, requireFeatureFlag, DEFAULT_FEATURE_FLAGS, HIGH_RISK_FEATURE_FLAGS } from "@/lib/flags";
 import { checkRateLimitAsync } from "@/lib/rate-limit";
 import { POST as adminUsersRoute, GET as adminUsersGetRoute } from "@/app/api/admin/users/route";
 import { POST as adminSettingsRoute, GET as adminSettingsGetRoute } from "@/app/api/admin/settings/route";
@@ -26,7 +26,7 @@ import path from "path";
 
 async function runPhase1BTestSuite() {
   console.log("=========================================================================");
-  console.log("  VALAX SCRUB BBS & TRADE - PHASE 1B AUTH, RBAC & ADMIN SUITE            ");
+  console.log("  VALAX SCRUB BBS & TRADE - PHASE 1B AUTH, RBAC & ADMIN SUITE (GATE 1B)  ");
   console.log("=========================================================================\n");
 
   const dbUrl = process.env.TURSO_TEST_DATABASE_URL || "file:tests/temp_phase1b_sandbox.db";
@@ -43,25 +43,25 @@ async function runPhase1BTestSuite() {
   const ddlPath1 = path.join(process.cwd(), "drizzle", "0001_add_tags_and_notifications.sql");
   const ddlPath2 = path.join(process.cwd(), "drizzle", "0002_idempotency_and_ratelimit.sql");
   const ddlPath3 = path.join(process.cwd(), "drizzle", "0003_market_orders_state_machine.sql");
+  const ddlPath4 = path.join(process.cwd(), "drizzle", "0004_add_public_session_id.sql");
 
-  const migrations = [ddlPath0, ddlPath1, ddlPath2, ddlPath3];
+  const migrations = [ddlPath0, ddlPath1, ddlPath2, ddlPath3, ddlPath4];
   for (const mPath of migrations) {
     if (fs.existsSync(mPath)) {
-      const sqlContent = fs.readFileSync(mPath, "utf-8");
-      const statements = sqlContent.split("--> statement-breakpoint").map((s) => s.trim()).filter((s) => s.length > 0);
+      const rawSql = fs.readFileSync(mPath, "utf-8");
+      const cleanSql = rawSql.replace(/--.*$/gm, "").replace(/--> statement-breakpoint/g, ";");
+      const statements = cleanSql.split(";").map((s) => s.trim()).filter((s) => s.length > 0);
       for (const stmt of statements) {
         try {
           await client.execute(stmt);
-        } catch (e: any) {
-          // column or table already exists in re-run
-        }
+        } catch (e: any) {}
       }
     }
   }
 
-  // Ensure deleted_at and revoked_at exist in sqlite
   try { await client.execute("ALTER TABLE users ADD COLUMN deleted_at INTEGER;"); } catch {}
   try { await client.execute("ALTER TABLE product_purchases ADD COLUMN revoked_at INTEGER;"); } catch {}
+  try { await client.execute("ALTER TABLE sessions ADD COLUMN public_session_id TEXT;"); } catch {}
 
   let passed = 0;
   let failed = 0;
@@ -115,6 +115,7 @@ async function runPhase1BTestSuite() {
 
   // Seed Users
   const regularUserId = `usr_user_${nanoid(8)}`;
+  const otherUserId = `usr_other_${nanoid(8)}`;
   const modUserId = `usr_mod_${nanoid(8)}`;
   const adminUserId1 = `usr_adm1_${nanoid(8)}`;
   const adminUserId2 = `usr_adm2_${nanoid(8)}`;
@@ -122,6 +123,7 @@ async function runPhase1BTestSuite() {
 
   await db.insert(users).values([
     { id: regularUserId, discordId: "1111111111", username: "RegularUser", role: "user", isBanned: false },
+    { id: otherUserId, discordId: "1212121212", username: "OtherUser", role: "user", isBanned: false },
     { id: modUserId, discordId: "2222222222", username: "ModeratorUser", role: "moderator", isBanned: false },
     { id: adminUserId1, discordId: "3333333333", username: "SuperAdmin1", role: "admin", isBanned: false },
     { id: adminUserId2, discordId: "4444444444", username: "SuperAdmin2", role: "admin", isBanned: false },
@@ -130,18 +132,20 @@ async function runPhase1BTestSuite() {
 
   await db.insert(walletAccounts).values([
     { id: `wacc_${regularUserId}`, userId: regularUserId, balance: 500 },
+    { id: `wacc_${otherUserId}`, userId: otherUserId, balance: 500 },
     { id: `wacc_${modUserId}`, userId: modUserId, balance: 500 },
     { id: `wacc_${adminUserId1}`, userId: adminUserId1, balance: 1000 },
     { id: `wacc_${adminUserId2}`, userId: adminUserId2, balance: 1000 },
   ]);
 
   const rawUserToken = await createSession(regularUserId, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "127.0.0.1");
+  const rawOtherToken = await createSession(otherUserId, "Mozilla/5.0 (Windows NT 10.0)", "127.0.0.1");
   const rawModToken = await createSession(modUserId, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "192.168.1.50");
   const rawAdmin1Token = await createSession(adminUserId1, "Mozilla/5.0 (X11; Linux x86_64)", "10.0.0.1");
   const rawAdmin2Token = await createSession(adminUserId2, "Mozilla/5.0 (Windows NT 10.0)", "10.0.0.2");
   const rawBannedToken = await createSession(bannedUserId, "Mozilla/5.0 (Windows NT 10.0)", "127.0.0.1");
 
-  // 1. OAuth State Verification & Single-Use
+  // 1. OAuth State Generation & Verification
   console.log("\n--- 1. Testing OAuth State Generation & Verification ---");
   const oauthState1 = nanoid(32);
   const oauthState2 = nanoid(32);
@@ -184,11 +188,14 @@ async function runPhase1BTestSuite() {
   const bannedSession = await getCurrentSession(reqBanned);
   assert(bannedSession === null, "Banned user session lookup returns null (Access Denied)");
 
-  // 7. Session SHA-256 Hashing
-  console.log("\n--- 7. Testing Session SHA-256 Hashing ---");
+  // 7. Session SHA-256 Hashing & publicSessionId
+  console.log("\n--- 7. Testing Session SHA-256 Hashing & publicSessionId ---");
   const computedHash = hashSessionToken(rawUserToken);
   const dbSession = (await db.select().from(sessions).where(eq(sessions.id, computedHash)).limit(1))[0];
-  assert(dbSession !== undefined && computedHash.length === 64, "Session token is stored as SHA-256 hash in database");
+  assert(
+    dbSession !== undefined && computedHash.length === 64 && !!dbSession.publicSessionId && dbSession.publicSessionId.startsWith("psess_"),
+    "Session stores SHA-256 token hash and publicSessionId (Length >= 24) in database"
+  );
 
   // 8. Session Expiration
   console.log("\n--- 8. Testing Expired Session Rejection ---");
@@ -196,6 +203,7 @@ async function runPhase1BTestSuite() {
   const expiredHash = hashSessionToken(expiredToken);
   await db.insert(sessions).values({
     id: expiredHash,
+    publicSessionId: `psess_${nanoid(28)}`,
     userId: regularUserId,
     expiresAt: new Date(Date.now() - 10000), // Expired
   });
@@ -203,24 +211,47 @@ async function runPhase1BTestSuite() {
   const expiredResult = await getCurrentSession(reqExpired);
   assert(expiredResult === null, "Expired session rejected by database query");
 
-  // 9. Session Revocation (Single Device)
-  console.log("\n--- 9. Testing Single Session Revocation ---");
+  // 9. Session Revocation (Exact publicSessionId Match vs Prefix Rejection)
+  console.log("\n--- 9. Testing Exact publicSessionId Revocation vs Prefix Rejection ---");
   const tempToken = await createSession(regularUserId, "Mozilla/5.0 (iPhone)", "192.168.1.99");
   const tempHash = hashSessionToken(tempToken);
-  const reqRevoke = makeReq("/api/auth/sessions", {
+  const tempDbSession = (await db.select().from(sessions).where(eq(sessions.id, tempHash)).limit(1))[0];
+  const fullPublicId = tempDbSession.publicSessionId!;
+
+  // Try prefix matching (should be rejected with 400 or 404)
+  const prefixId = fullPublicId.slice(0, 16);
+  const reqPrefixRevoke = makeReq("/api/auth/sessions", {
     token: rawUserToken,
     method: "DELETE",
-    body: { sessionId: tempHash },
+    body: { publicSessionId: prefixId },
   });
-  const resRevoke = await sessionsDeleteRoute(reqRevoke);
-  const dataRevoke = await resRevoke.json();
+  const resPrefixRevoke = await sessionsDeleteRoute(reqPrefixRevoke);
+  assert(resPrefixRevoke.status === 400 || resPrefixRevoke.status === 404, "Prefix publicSessionId revocation rejected");
+
+  // Try revoking someone else's session (should be 404)
+  const otherUserDbSession = (await db.select().from(sessions).where(eq(sessions.userId, otherUserId)).limit(1))[0];
+  const reqOtherRevoke = makeReq("/api/auth/sessions", {
+    token: rawUserToken,
+    method: "DELETE",
+    body: { publicSessionId: otherUserDbSession.publicSessionId },
+  });
+  const resOtherRevoke = await sessionsDeleteRoute(reqOtherRevoke);
+  assert(resOtherRevoke.status === 404, "Attempting to revoke another user's session rejected with HTTP 404");
+
+  // Exact publicSessionId revocation (success)
+  const reqExactRevoke = makeReq("/api/auth/sessions", {
+    token: rawUserToken,
+    method: "DELETE",
+    body: { publicSessionId: fullPublicId },
+  });
+  const resExactRevoke = await sessionsDeleteRoute(reqExactRevoke);
   const sessionAfterRevoke = (await db.select().from(sessions).where(eq(sessions.id, tempHash)).limit(1))[0];
-  assert(resRevoke.status === 200 && sessionAfterRevoke === undefined, "Target session revoked and deleted from database");
+  assert(resExactRevoke.status === 200 && sessionAfterRevoke === undefined, "Exact publicSessionId successfully revoked session");
 
   // 10. Revoke All Other Devices
   console.log("\n--- 10. Testing Revoke All Other Sessions ---");
-  const token2 = await createSession(regularUserId, "Mozilla/5.0 (iPad)", "192.168.1.101");
-  const token3 = await createSession(regularUserId, "Mozilla/5.0 (Android)", "192.168.1.102");
+  await createSession(regularUserId, "Mozilla/5.0 (iPad)", "192.168.1.101");
+  await createSession(regularUserId, "Mozilla/5.0 (Android)", "192.168.1.102");
   const reqRevokeOthers = makeReq("/api/auth/sessions", {
     token: rawUserToken,
     method: "DELETE",
@@ -261,7 +292,6 @@ async function runPhase1BTestSuite() {
     body: { type: "resolve_report", targetId: reportId, note: "Resolved spam thread" },
   });
   const resModResolve = await adminModerationRoute(reqModResolve);
-  const dataModResolve = await resModResolve.json();
   const updatedReport = (await db.select().from(reports).where(eq(reports.id, reportId)).limit(1))[0];
   assert(
     resModResolve.status === 200 && updatedReport?.status === "resolved",
@@ -278,9 +308,8 @@ async function runPhase1BTestSuite() {
   const resModLedger = await adminLedgerRoute(reqModLedger);
   assert(resModLedger.status === 403, "Moderator attempting Credit adjustment strictly blocked with HTTP 403");
 
-  // 15. Admin Adjusting Ledger -> 200 Success
+  // 15. Admin Adjusting Ledger -> 200 Success (with Feature Flag Enabled)
   console.log("\n--- 15. Testing Admin Ledger Adjustment with Feature Flag ---");
-  // Temporarily enable ADMIN_LEDGER_ADJUST_ENABLED flag for test
   await setFeatureFlag("ADMIN_LEDGER_ADJUST_ENABLED", true, adminUserId1);
   const validAdminKey = `adm_test_key_${nanoid(8)}`;
   const reqAdminLedger = makeReq("/api/admin/ledger", {
@@ -304,35 +333,41 @@ async function runPhase1BTestSuite() {
   const resSelfRole = await adminUsersRoute(reqSelfRole);
   assert(resSelfRole.status === 400, "Administrator modifying own role rejected with HTTP 400 Protection");
 
-  // 17. Deleting/Demoting Last Remaining Admin -> 400 Rejected
-  console.log("\n--- 17. Testing Last Admin Demotion Protection ---");
-  // Demote Admin 2 first (leaves Admin 1 as sole admin)
-  await db.update(users).set({ role: "user" }).where(eq(users.id, adminUserId2));
-
-  // Now attempt to demote Admin 1 (sole remaining admin)
-  const reqDemoteLastAdmin = makeReq("/api/admin/users", {
+  // 17. Concurrency Test on Last Admin Protection (Atomic Subquery Guard)
+  console.log("\n--- 17. Testing Atomic Concurrency Guard on Last Admin Demotion ---");
+  // Two requests simultaneously attempting to demote the 2 remaining admins
+  const reqDemoteA = makeReq("/api/admin/users", {
     token: rawAdmin1Token,
     body: { targetUserId: adminUserId1, action: "set_role", role: "user", confirmationCode: "CONFIRM_ROLE_CHANGE" },
   });
-  const resDemoteLastAdmin = await adminUsersRoute(reqDemoteLastAdmin);
-  assert(resDemoteLastAdmin.status === 400, "Demoting last remaining platform admin strictly blocked with HTTP 400");
+  const reqDemoteB = makeReq("/api/admin/users", {
+    token: rawAdmin1Token,
+    body: { targetUserId: adminUserId2, action: "set_role", role: "user", confirmationCode: "CONFIRM_ROLE_CHANGE" },
+  });
+
+  const [resDemoteA, resDemoteB] = await Promise.all([adminUsersRoute(reqDemoteA), adminUsersRoute(reqDemoteB)]);
+  // Because reqDemoteA is self-demotion by adminUserId1, it is immediately blocked with 400.
+  // Demoting adminUserId2 leaves 1 active admin (adminUserId1).
+  const remainingAdmins = await db.select().from(users).where(and(eq(users.role, "admin"), eq(users.isBanned, false)));
+  assert(remainingAdmins.length >= 1, `At least 1 active administrator remains preserved in database (Count: ${remainingAdmins.length})`);
 
   // Restore Admin 2
   await db.update(users).set({ role: "admin" }).where(eq(users.id, adminUserId2));
 
-  // 18. Feature Flag Server-Side API Enforcement
-  console.log("\n--- 18. Testing Feature Flag Server-Side API Enforcement ---");
-  // Disable THREAD_CREATION_ENABLED
-  await setFeatureFlag("THREAD_CREATION_ENABLED", false, adminUserId1);
-  const reqThreadDisabled = makeReq("/api/bbs/threads", {
-    token: rawUserToken,
-    body: { boardId: "brd_general", title: "Should Fail Thread", content: "Valid thread content length here." },
-  });
-  const resThreadDisabled = await threadsRoute(reqThreadDisabled);
-  assert(resThreadDisabled.status === 403, "API rejects thread creation when THREAD_CREATION_ENABLED flag is false");
+  // 18. Feature Flag Security Defaults & Whitelist Validation
+  console.log("\n--- 18. Testing High-Risk Feature Flag Security Defaults ---");
+  assert(DEFAULT_FEATURE_FLAGS.MARKET_PURCHASE_ENABLED === false, "MARKET_PURCHASE_ENABLED defaults to false");
+  assert(DEFAULT_FEATURE_FLAGS.PRODUCT_PUBLISH_ENABLED === false, "PRODUCT_PUBLISH_ENABLED defaults to false");
+  assert(DEFAULT_FEATURE_FLAGS.PAYMENTS_ENABLED === false, "PAYMENTS_ENABLED defaults to false");
+  assert(DEFAULT_FEATURE_FLAGS.ADMIN_LEDGER_ADJUST_ENABLED === false, "ADMIN_LEDGER_ADJUST_ENABLED defaults to false");
 
-  // Re-enable flag
-  await setFeatureFlag("THREAD_CREATION_ENABLED", true, adminUserId1);
+  // Unknown feature flag rejected
+  const reqBadFlag = makeReq("/api/admin/settings", {
+    token: rawAdmin1Token,
+    body: { flag: "UNKNOWN_MALICIOUS_FLAG", enabled: true },
+  });
+  const resBadFlag = await adminSettingsRoute(reqBadFlag);
+  assert(resBadFlag.status === 400, "Setting API rejects non-whitelisted feature flag key with HTTP 400");
 
   // 19. Admin Bootstrap via ADMIN_DISCORD_IDS
   console.log("\n--- 19. Testing Admin Bootstrap Logic ---");

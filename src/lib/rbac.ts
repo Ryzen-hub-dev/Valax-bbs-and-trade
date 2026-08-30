@@ -1,7 +1,7 @@
 import { getCurrentSession } from "@/lib/auth";
 import { users, auditLogs } from "@/db/schema";
 import { db } from "@/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { NextRequest } from "next/server";
 
 export type Role = "user" | "moderator" | "admin";
@@ -70,20 +70,20 @@ const ROLE_PERMISSIONS: Record<Role, Set<Permission>> = {
 };
 
 export function hasPermission(
-  user: { role?: string; isBanned?: boolean } | null | undefined,
+  user: { role?: string; isBanned?: boolean; deletedAt?: Date | null } | null | undefined,
   permission: Permission
 ): boolean {
-  if (!user || user.isBanned) return false;
+  if (!user || user.isBanned || user.deletedAt) return false;
   const role = (user.role as Role) || "user";
   const permissions = ROLE_PERMISSIONS[role];
   return permissions ? permissions.has(permission) : false;
 }
 
-export function isUserAdmin(user?: { role?: string; isBanned?: boolean } | null): boolean {
+export function isUserAdmin(user?: { role?: string; isBanned?: boolean; deletedAt?: Date | null } | null): boolean {
   return hasPermission(user, "settings.manage");
 }
 
-export function isUserModerator(user?: { role?: string; isBanned?: boolean } | null): boolean {
+export function isUserModerator(user?: { role?: string; isBanned?: boolean; deletedAt?: Date | null } | null): boolean {
   return hasPermission(user, "forum.thread.moderate");
 }
 
@@ -92,7 +92,7 @@ export async function requireAuth(req?: NextRequest) {
   if (!session) {
     throw new Error("UNAUTHORIZED: Please sign in with Discord.");
   }
-  if (session.user.isBanned) {
+  if (session.user.isBanned || session.user.deletedAt) {
     throw new Error("UNAUTHORIZED: Account has been suspended.");
   }
   return session;
@@ -121,7 +121,7 @@ export async function isLastActiveAdmin(userId: string): Promise<boolean> {
   const adminUsers = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.role, "admin"), eq(users.isBanned, false)));
+    .where(and(eq(users.role, "admin"), eq(users.isBanned, false), isNull(users.deletedAt)));
 
   if (adminUsers.length <= 1 && adminUsers.some((u) => u.id === userId)) {
     return true;

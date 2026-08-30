@@ -1,3 +1,4 @@
+import { setFeatureFlag } from "@/lib/flags";
 // Set isolated test environment flags BEFORE importing modules
 (process.env as any).NODE_ENV = "test";
 process.env.IS_TEST = "true";
@@ -38,11 +39,13 @@ async function runRealRouteHandlersSuite() {
   const ddlPath2 = path.join(process.cwd(), "drizzle", "0002_idempotency_and_ratelimit.sql");
   const ddlPath3 = path.join(process.cwd(), "drizzle", "0003_market_orders_state_machine.sql");
 
-  const migrations = [ddlPath0, ddlPath1, ddlPath2, ddlPath3];
+  const ddlPath4 = path.join(process.cwd(), "drizzle", "0004_add_public_session_id.sql");
+  const migrations = [ddlPath0, ddlPath1, ddlPath2, ddlPath3, ddlPath4];
   for (const mPath of migrations) {
     if (fs.existsSync(mPath)) {
-      const sqlContent = fs.readFileSync(mPath, "utf-8");
-      const statements = sqlContent.split("--> statement-breakpoint").map((s) => s.trim()).filter((s) => s.length > 0);
+      const rawSql = fs.readFileSync(mPath, "utf-8");
+      const cleanSql = rawSql.replace(/--.*$/gm, "").replace(/--> statement-breakpoint/g, ";");
+      const statements = cleanSql.split(";").map((s) => s.trim()).filter((s) => s.length > 0);
       for (const stmt of statements) {
         try {
           await client.execute(stmt);
@@ -67,6 +70,8 @@ async function runRealRouteHandlersSuite() {
     }
   }
 
+
+
   // 1. Setup Test Users and Sessions in Database
   const testBuyerId = `test_buyer_${nanoid(8)}`;
   const testDevId = `test_dev_${nanoid(8)}`;
@@ -84,9 +89,13 @@ async function runRealRouteHandlersSuite() {
     { id: testAdminId, discordId: `disc_${nanoid(8)}`, username: "TestAdmin", role: "admin" },
   ]);
 
+  // Enable feature flags using valid seeded admin operator
+  await setFeatureFlag("MARKET_PURCHASE_ENABLED", true, testAdminId);
+  await setFeatureFlag("ADMIN_LEDGER_ADJUST_ENABLED", true, testAdminId);
+
   await db.insert(sessions).values([
-    { id: hashedBuyerToken, userId: testBuyerId, expiresAt: new Date(Date.now() + 86400000) },
-    { id: hashedAdminToken, userId: testAdminId, expiresAt: new Date(Date.now() + 86400000) },
+    { id: hashedBuyerToken, publicSessionId: `psess_${nanoid(24)}`, userId: testBuyerId, expiresAt: new Date(Date.now() + 86400000) },
+    { id: hashedAdminToken, publicSessionId: `psess_${nanoid(24)}`, userId: testAdminId, expiresAt: new Date(Date.now() + 86400000) },
   ]);
 
   await db.insert(walletAccounts).values([
@@ -220,7 +229,7 @@ async function runRealRouteHandlersSuite() {
   const res4 = await purchaseRoute(req4);
   assert(res4.status === 404, "Draft/Pending product returns HTTP 404 Not Found");
 
-  // TEST 5: Successful Purchase Flow -> 200
+  // Enable MARKET_PURCHASE_ENABLED for purchase test`n  `n  await setFeatureFlag("MARKET_PURCHASE_ENABLED", true, testAdminId);`n`n  // TEST 5: Successful Purchase Flow -> 200
   console.log("\n--- 5. Testing Real POST /api/market/purchase Success ---");
   const validPurchaseKey = `idemp_purchase_real_${nanoid(8)}`;
   const req5 = makeReq("/api/market/purchase", {
@@ -265,7 +274,7 @@ async function runRealRouteHandlersSuite() {
 
   // TEST 9: Admin Ledger Adjustment Success & Fingerprinted Replay
   console.log("\n--- 9. Testing Admin Ledger Adjustment Fingerprinted Conflict Guard ---");
-  const { setFeatureFlag } = await import("@/lib/flags");
+
   await setFeatureFlag("ADMIN_LEDGER_ADJUST_ENABLED", true, testAdminId);
 
   const adminIdempKey = `adm_adjust_key_${nanoid(8)}`;

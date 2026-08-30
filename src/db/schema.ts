@@ -25,6 +25,7 @@ export const users = sqliteTable("users", {
 // 2. User Sessions (Revocable, SHA-256 Hashed Token ID)
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(), // SHA-256 hash of session token
+  publicSessionId: text("public_session_id").notNull().unique(), // Opaque random identifier safe for client-side display & exact revocation
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
@@ -33,6 +34,7 @@ export const sessions = sqliteTable("sessions", {
 }, (table) => ({
   userIdIdx: index("sessions_user_id_idx").on(table.userId),
   expiresAtIdx: index("sessions_expires_at_idx").on(table.expiresAt),
+  publicSessionIdIdx: index("sessions_public_session_id_idx").on(table.publicSessionId),
 }));
 
 // 3. Valax Utility Credit Wallet Accounts

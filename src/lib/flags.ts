@@ -15,6 +15,13 @@ export type FeatureFlagKey =
   | "PAYMENTS_ENABLED"
   | "ADMIN_LEDGER_ADJUST_ENABLED";
 
+export const HIGH_RISK_FEATURE_FLAGS: Set<FeatureFlagKey> = new Set<FeatureFlagKey>([
+  "MARKET_PURCHASE_ENABLED",
+  "PRODUCT_PUBLISH_ENABLED",
+  "PAYMENTS_ENABLED",
+  "ADMIN_LEDGER_ADJUST_ENABLED",
+]);
+
 export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlagKey, boolean> = {
   MAINTENANCE_MODE: false,
   FORUM_ENABLED: true,
@@ -22,15 +29,15 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlagKey, boolean> = {
   REPLIES_ENABLED: true,
   REPORTS_ENABLED: true,
   MARKET_ENABLED: true,
-  PRODUCT_PUBLISH_ENABLED: false, // Default disabled until enabled by admin
-  MARKET_PURCHASE_ENABLED: true,
-  PAYMENTS_ENABLED: false, // Default disabled until enabled by admin
-  ADMIN_LEDGER_ADJUST_ENABLED: false, // Default disabled until enabled by admin
+  PRODUCT_PUBLISH_ENABLED: false, // High-risk: Default disabled
+  MARKET_PURCHASE_ENABLED: false, // High-risk: Default disabled
+  PAYMENTS_ENABLED: false, // High-risk: Default disabled
+  ADMIN_LEDGER_ADJUST_ENABLED: false, // High-risk: Default disabled
 };
 
 /**
  * Checks whether a specific feature flag is currently active in the database.
- * Falls back to strict platform default if not configured.
+ * High-risk flags strictly fail closed (return false) upon database failure.
  */
 export async function isFeatureEnabled(flag: FeatureFlagKey): Promise<boolean> {
   try {
@@ -48,7 +55,11 @@ export async function isFeatureEnabled(flag: FeatureFlagKey): Promise<boolean> {
 
     return setting.value === "true";
   } catch (err) {
-    console.error(`[Flags Error] Failed to read flag ${flag}:`, err);
+    console.error(`[Flags Fail-Closed] Failed to read flag ${flag} from database:`, err);
+    // High-risk flags strictly fail closed to prevent unauthorized purchases or transactions
+    if (HIGH_RISK_FEATURE_FLAGS.has(flag)) {
+      return false;
+    }
     return DEFAULT_FEATURE_FLAGS[flag] ?? false;
   }
 }

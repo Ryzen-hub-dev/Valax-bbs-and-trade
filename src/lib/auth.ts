@@ -85,11 +85,13 @@ export async function getCurrentSession(req?: NextRequest): Promise<UserSession 
 
 export async function createSession(userId: string, userAgent?: string, ipAddress?: string): Promise<string> {
   const rawToken = nanoid(48);
+  const publicSessionId = `psess_${nanoid(28)}`;
   const tokenHash = hashSessionToken(rawToken);
   const expiresAt = new Date(Date.now() + SESSION_EXPIRY_SECONDS * 1000);
 
   await db.insert(sessions).values({
     id: tokenHash,
+    publicSessionId,
     userId,
     expiresAt,
     userAgent: userAgent ? userAgent.slice(0, 500) : null,

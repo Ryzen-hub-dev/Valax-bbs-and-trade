@@ -20,7 +20,7 @@ async function runMigrationReplayTest() {
     "0000_init_schema.sql",
     "0001_add_tags_and_notifications.sql",
     "0002_idempotency_and_ratelimit.sql",
-    "0003_market_orders_state_machine.sql",
+    "0003_market_orders_state_machine.sql", "0004_add_public_session_id.sql",
   ];
 
   let passed = 0;

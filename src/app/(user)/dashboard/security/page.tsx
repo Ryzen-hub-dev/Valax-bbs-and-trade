@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Shield, Smartphone, Laptop, Globe, LogOut, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
 
 interface SessionInfo {
-  id: string;
+  publicSessionId: string;
   userAgent: string;
   maskedIp: string;
   createdAt: string;
@@ -39,14 +39,14 @@ export default function SecurityDashboardPage() {
     fetchSessions();
   }, []);
 
-  const handleRevokeSession = async (sessionId: string) => {
+  const handleRevokeSession = async (publicSessionId: string) => {
     setActionLoading(true);
     setMessage(null);
     try {
       const res = await fetch("/api/auth/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ publicSessionId }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -150,7 +150,7 @@ export default function SecurityDashboardPage() {
             const isMobile = /mobile|android|iphone|ipad/i.test(sess.userAgent);
             return (
               <div
-                key={sess.id}
+                key={sess.publicSessionId}
                 className={`p-5 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
                   sess.isCurrent
                     ? "bg-primary/5 border-primary/40 shadow-sm shadow-primary/5"
@@ -194,7 +194,7 @@ export default function SecurityDashboardPage() {
 
                 {!sess.isCurrent && (
                   <button
-                    onClick={() => handleRevokeSession(sess.id)}
+                    onClick={() => handleRevokeSession(sess.publicSessionId)}
                     disabled={actionLoading}
                     className="px-3 py-1.5 text-xs text-red-400 border border-red-900/50 hover:bg-red-950/50 hover:border-red-700 rounded-lg transition self-start sm:self-center"
                   >

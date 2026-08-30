@@ -1,11 +1,10 @@
 import { db } from "@/db";
 import { sessions, auditLogs } from "@/db/schema";
-import { getCurrentSession, clearSessionCookie, hashSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { getCurrentSession, clearSessionCookie } from "@/lib/auth";
 import { validateCsrfOrigin } from "@/lib/csrf";
-import { handleApiError } from "@/lib/errors";
+import { handleApiError, generateRequestId } from "@/lib/errors";
 import { eq, and, ne, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -27,7 +26,7 @@ function maskIp(ip?: string | null): string {
 }
 
 const deleteSessionSchema = z.object({
-  sessionId: z.string().optional(),
+  publicSessionId: z.string().min(24).max(64).optional(),
   revokeOthers: z.boolean().optional(),
   revokeAll: z.boolean().optional(),
 });
@@ -42,6 +41,7 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     const userSessions = await db
       .select({
+        publicSessionId: sessions.publicSessionId,
         id: sessions.id,
         userAgent: sessions.userAgent,
         ipAddress: sessions.ipAddress,
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       .where(and(eq(sessions.userId, current.user.id), gt(sessions.expiresAt, now)));
 
     const formatted = userSessions.map((s) => ({
-      id: s.id.slice(0, 16) + "...",
+      publicSessionId: s.publicSessionId || `psess_${s.id.slice(0, 24)}`,
       userAgent: s.userAgent || "Unknown Device / Browser",
       maskedIp: maskIp(s.ipAddress),
       createdAt: s.createdAt,
@@ -79,7 +79,9 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { sessionId, revokeOthers, revokeAll } = deleteSessionSchema.parse(body);
+    const { publicSessionId, revokeOthers, revokeAll } = deleteSessionSchema.parse(body);
+
+    const requestId = generateRequestId();
 
     if (revokeAll) {
       await db.delete(sessions).where(eq(sessions.userId, current.user.id));
@@ -91,6 +93,7 @@ export async function DELETE(req: NextRequest) {
         action: "REVOKE_ALL_SESSIONS",
         targetType: "user",
         targetId: current.user.id,
+        details: JSON.stringify({ requestId }),
       });
 
       return NextResponse.json({ success: true, message: "All sessions have been revoked." });
@@ -107,35 +110,45 @@ export async function DELETE(req: NextRequest) {
         action: "REVOKE_OTHER_SESSIONS",
         targetType: "user",
         targetId: current.user.id,
+        details: JSON.stringify({ requestId }),
       });
 
       return NextResponse.json({ success: true, message: "All other sessions have been revoked." });
     }
 
-    if (sessionId) {
-      // Find matching session by prefix or exact hash
-      const userSessions = await db.select().from(sessions).where(eq(sessions.userId, current.user.id));
-      const target = userSessions.find((s) => s.id.startsWith(sessionId.replace("...", "")) || s.id === sessionId);
+    if (publicSessionId) {
+      // Strictly match exact publicSessionId belonging to this user
+      const targetSession = (
+        await db
+          .select()
+          .from(sessions)
+          .where(and(eq(sessions.userId, current.user.id), eq(sessions.publicSessionId, publicSessionId)))
+          .limit(1)
+      )[0];
 
-      if (target) {
-        await db.delete(sessions).where(eq(sessions.id, target.id));
-        if (target.id === current.session.id) {
-          await clearSessionCookie();
-        }
-
-        await db.insert(auditLogs).values({
-          id: `aud_${nanoid(16)}`,
-          operatorId: current.user.id,
-          action: "REVOKE_SINGLE_SESSION",
-          targetType: "session",
-          targetId: target.id,
-        });
-
-        return NextResponse.json({ success: true, message: "Selected session revoked." });
+      if (!targetSession) {
+        return NextResponse.json({ error: "Session not found or already revoked." }, { status: 404 });
       }
+
+      await db.delete(sessions).where(eq(sessions.id, targetSession.id));
+
+      if (targetSession.id === current.session.id) {
+        await clearSessionCookie();
+      }
+
+      await db.insert(auditLogs).values({
+        id: `aud_${nanoid(16)}`,
+        operatorId: current.user.id,
+        action: "REVOKE_SINGLE_SESSION",
+        targetType: "session",
+        targetId: publicSessionId,
+        details: JSON.stringify({ requestId }),
+      });
+
+      return NextResponse.json({ success: true, message: "Selected session revoked." });
     }
 
-    return NextResponse.json({ error: "Invalid revocation request." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid revocation request. Please specify publicSessionId, revokeOthers, or revokeAll." }, { status: 400 });
   } catch (err: any) {
     return handleApiError(err, { publicMessage: "Failed to revoke session.", route: "/api/auth/sessions" });
   }

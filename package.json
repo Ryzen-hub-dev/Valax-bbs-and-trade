@@ -9,7 +9,7 @@
                     "start":  "next start",
                     "lint":  "node run_lint.mjs",
                     "typecheck":  "tsc --noEmit",
-                    "test":  "tsx tests/phase1a_security.test.ts \u0026\u0026 tsx tests/phase1a_migration_replay.test.ts \u0026\u0026 tsx tests/phase1a_route_handlers.test.ts \u0026\u0026 tsx tests/phase1b_auth_rbac.test.ts",
+                    "test":  "node run_tests.mjs",
                     "db:push":  "drizzle-kit push",
                     "db:generate":  "drizzle-kit generate",
                     "db:seed":  "tsx src/db/seed.ts"
