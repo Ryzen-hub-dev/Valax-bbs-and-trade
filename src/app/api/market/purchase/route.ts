@@ -1,14 +1,17 @@
 import { db } from "@/db";
 import { products, productPurchases, walletAccounts, walletLedger, auditLogs } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
-import { executeLedgerTransaction, getUserWallet } from "@/lib/ledger";
-import { checkRateLimit } from "@/lib/rate-limit";
-import { getSafeOrigin } from "@/config/origins";
+import { getUserWallet, executeLedgerTransaction } from "@/lib/ledger";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { validateCsrfOrigin } from "@/lib/csrf";
 import { handleApiError } from "@/lib/errors";
 import { eq, and, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const purchaseSchema = z.object({
   productId: z.string().min(1).max(64),
@@ -23,19 +26,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }
 
-  // 2. CSRF & Origin Validation
-  const originHeader = req.headers.get("origin") || req.headers.get("referer");
-  if (originHeader) {
-    const verifiedOrigin = getSafeOrigin(originHeader);
-    if (!verifiedOrigin) {
-      return NextResponse.json({ error: "Forbidden: Untrusted Origin or Referer." }, { status: 403 });
-    }
+  // 2. Strict CSRF & Origin Validation (Mandatory for state-mutating requests)
+  const csrf = validateCsrfOrigin(req);
+  if (!csrf.isValid) {
+    return csrf.errorResponse!;
   }
 
-  // 3. IP + User Rate Limiting (10 requests per minute)
+  // 3. Distributed IP + User Rate Limiting (Max 10 purchase requests per minute)
   const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown_ip";
   const rateKey = `purchase:${session.user.id}:${clientIp}`;
-  const rate = checkRateLimit(rateKey, { maxRequests: 10, windowSeconds: 60 });
+  const rate = await checkRateLimitAsync(rateKey, { maxRequests: 10, windowSeconds: 60 });
   if (!rate.allowed) {
     return NextResponse.json(
       { error: "Too many purchase attempts. Please wait a moment before trying again." },
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4. Strict Header Idempotency-Key Enforcement
+  // 4. Strict Mandatory Idempotency-Key Header Enforcement
   const rawIdempotencyKey = req.headers.get("Idempotency-Key")?.trim();
   if (!rawIdempotencyKey) {
     return NextResponse.json(
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 5. Request body parsing & size validation (< 10KB)
+    // 5. Payload Size Validation (< 10KB)
     const rawBodyText = await req.text();
     if (rawBodyText.length > 10240) {
       return NextResponse.json({ error: "Request payload too large." }, { status: 413 });
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     const body = JSON.parse(rawBodyText || "{}");
     const { productId } = purchaseSchema.parse(body);
 
-    // 6. Check prior purchase by Idempotency-Key (Idempotent response)
+    // 6. Check Prior Purchase by (buyerId, idempotencyKey)
     const existingByIdempotency = await db
       .select()
       .from(productPurchases)
@@ -83,6 +83,14 @@ export async function POST(req: NextRequest) {
 
     if (existingByIdempotency.length > 0) {
       const priorEnt = existingByIdempotency[0];
+      // Conflict check: Same key cannot be reused for a different product
+      if (priorEnt.productId !== productId) {
+        return NextResponse.json(
+          { error: "Idempotency conflict: This Idempotency-Key was already used for a different digital asset." },
+          { status: 409 }
+        );
+      }
+
       const prod = (
         await db.select().from(products).where(eq(products.id, priorEnt.productId)).limit(1)
       )[0];
@@ -96,7 +104,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 7. Validate Product from Database
+    // 7. Validate Product Server-Side State & Strict Integer Price
     const product = (
       await db.select().from(products).where(eq(products.id, productId)).limit(1)
     )[0];
@@ -114,7 +122,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid product pricing configuration in catalog." }, { status: 400 });
     }
 
-    // 8. Prevent duplicate active entitlement (Concurrency & Race Condition check)
+    // 8. Prevent Duplicate Active Entitlement (Partial Unique Index Protection)
     const existingActiveEntitlement = await db
       .select()
       .from(productPurchases)
@@ -137,7 +145,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 9. Check Buyer Wallet Balance
+    // 9. Verify Buyer Wallet Balance
     const buyerWallet = await getUserWallet(session.user.id);
     if (!buyerWallet || buyerWallet.balance < tokenPrice) {
       return NextResponse.json(
@@ -165,7 +173,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: debitResult.error || "Credit transaction failed." }, { status: 400 });
     }
 
-    // Step B: Insert Entitlement with Idempotency Key
+    // Step B: Insert Entitlement Record
     try {
       await db.insert(productPurchases).values({
         id: purchaseId,
@@ -177,8 +185,9 @@ export async function POST(req: NextRequest) {
         status: "active",
       });
     } catch (insertErr: any) {
-      // Compensate / Rollback credit deduction if duplicate active constraint triggered
-      await executeLedgerTransaction({
+      // Automatic Compensation Rollback
+      console.error("[Purchase Error] Entitlement insert failed. Executing compensation rollback...", insertErr);
+      const rollbackResult = await executeLedgerTransaction({
         userId: session.user.id,
         amount: tokenPrice,
         type: "admin_adjustment",
@@ -187,27 +196,48 @@ export async function POST(req: NextRequest) {
         idempotencyKey: `rollback_${rawIdempotencyKey}`,
         notes: `Rollback duplicate purchase for: ${product.title}`,
       });
+
+      if (!rollbackResult.success) {
+        // Log critical recovery record in audit logs
+        await db.insert(auditLogs).values({
+          id: `crit_${nanoid(16)}`,
+          operatorId: session.user.id,
+          action: "CRITICAL_RECOVERY_REQUIRED",
+          targetType: "product_purchase",
+          targetId: purchaseId,
+          details: JSON.stringify({ error: insertErr?.message, buyerId: session.user.id, tokenPrice }),
+        });
+      }
+
       return NextResponse.json(
-        { error: "Conflict: Concurrent purchase already in progress or completed." },
+        { error: "Conflict: Concurrent purchase already in progress or active entitlement exists." },
         { status: 409 }
       );
     }
 
     // Step C: Increment Sales Counter
-    await db
-      .update(products)
-      .set({ salesCount: sql`${products.salesCount} + 1` })
-      .where(eq(products.id, product.id));
+    try {
+      await db
+        .update(products)
+        .set({ salesCount: sql`${products.salesCount} + 1` })
+        .where(eq(products.id, product.id));
+    } catch (salesErr) {
+      console.warn("[Purchase Warning] Sales count increment failed non-fatally:", salesErr);
+    }
 
     // Step D: Write Audit Log
-    await db.insert(auditLogs).values({
-      id: `aud_${nanoid(16)}`,
-      operatorId: session.user.id,
-      action: "MARKET_PURCHASE",
-      targetType: "product",
-      targetId: product.id,
-      details: JSON.stringify({ purchaseId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
-    });
+    try {
+      await db.insert(auditLogs).values({
+        id: `aud_${nanoid(16)}`,
+        operatorId: session.user.id,
+        action: "MARKET_PURCHASE",
+        targetType: "product",
+        targetId: product.id,
+        details: JSON.stringify({ purchaseId, tokensSpent: tokenPrice, idempotencyKey: rawIdempotencyKey }),
+      });
+    } catch (audErr) {
+      console.warn("[Purchase Warning] Audit log write failed non-fatally:", audErr);
+    }
 
     return NextResponse.json({
       success: true,

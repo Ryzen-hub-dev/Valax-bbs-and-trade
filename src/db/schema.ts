@@ -92,7 +92,7 @@ export const forumThreads = sqliteTable("forum_threads", {
   title: text("title").notNull(),
   slug: text("slug").notNull().unique(),
   content: text("content").notNull(),
-  tags: text("tags").default("[]").notNull(), // JSON array cache
+  tags: text("tags").default("[]").notNull(),
   isPinned: integer("is_pinned", { mode: "boolean" }).default(false).notNull(),
   isHighlighted: integer("is_highlighted", { mode: "boolean" }).default(false).notNull(),
   isLocked: integer("is_locked", { mode: "boolean" }).default(false).notNull(),
@@ -209,21 +209,21 @@ export const products = sqliteTable("products", {
   moderationStatusIdx: index("products_mod_status_idx").on(table.moderationStatus),
 }));
 
-// 13. Digital Product Purchases and Entitlements (Financial Data Preserved)
+// 13. Digital Product Purchases and Entitlements (Financial Data Preserved, User+Idempotency Unique)
 export const productPurchases = sqliteTable("product_purchases", {
   id: text("id").primaryKey(),
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
   buyerId: text("buyer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   tokensSpent: integer("tokens_spent").notNull(),
   licenseKey: text("license_key").notNull().unique(),
-  idempotencyKey: text("idempotency_key").notNull().unique(),
+  idempotencyKey: text("idempotency_key").notNull(),
   status: text("status", { enum: ["active", "revoked", "refunded"] }).default("active").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
   revokedAt: integer("revoked_at", { mode: "timestamp" }),
 }, (table) => ({
   productIdIdx: index("purchases_product_id_idx").on(table.productId),
   buyerIdIdx: index("purchases_buyer_id_idx").on(table.buyerId),
-  idempotencyKeyIdx: index("purchases_idempotency_key_idx").on(table.idempotencyKey),
+  buyerIdempotencyUnique: uniqueIndex("purchases_buyer_idempotency_idx").on(table.buyerId, table.idempotencyKey),
   buyerProductStatusIdx: index("purchases_buyer_product_status_idx").on(table.buyerId, table.productId, table.status),
 }));
 
@@ -298,3 +298,12 @@ export const systemSettings = sqliteTable("system_settings", {
   value: text("value").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`).notNull(),
 });
+
+// 19. Distributed Turso-Backed Rate Limiting (Serverless multi-instance support)
+export const rateLimitEvents = sqliteTable("rate_limit_events", {
+  key: text("key").primaryKey(),
+  count: integer("count").default(1).notNull(),
+  resetAt: integer("reset_at", { mode: "timestamp" }).notNull(),
+}, (table) => ({
+  resetAtIdx: index("rate_limit_reset_at_idx").on(table.resetAt),
+}));

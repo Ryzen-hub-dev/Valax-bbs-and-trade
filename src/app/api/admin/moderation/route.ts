@@ -1,10 +1,15 @@
 import { db } from "@/db";
 import { reports, forumThreads, products, auditLogs } from "@/db/schema";
 import { requireModerator } from "@/lib/rbac";
+import { validateCsrfOrigin } from "@/lib/csrf";
+import { handleApiError } from "@/lib/errors";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const modActionSchema = z.object({
   type: z.enum(["resolve_report", "delete_thread", "pin_thread", "approve_product", "reject_product"]),
@@ -15,6 +20,12 @@ const modActionSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const modUser = await requireModerator();
+
+    const csrf = validateCsrfOrigin(req);
+    if (!csrf.isValid) {
+      return csrf.errorResponse!;
+    }
+
     const body = await req.json();
     const { type, targetId, note } = modActionSchema.parse(body);
 
@@ -31,7 +42,7 @@ export async function POST(req: NextRequest) {
         await db.update(forumThreads).set({ isPinned: !thread.isPinned }).where(eq(forumThreads.id, targetId));
       }
     } else if (type === "approve_product") {
-      await db.update(products).set({ moderationStatus: "approved" }).where(eq(products.id, targetId));
+      await db.update(products).set({ moderationStatus: "approved", status: "active" }).where(eq(products.id, targetId));
     } else if (type === "reject_product") {
       await db.update(products).set({ moderationStatus: "rejected", moderationNote: note }).where(eq(products.id, targetId));
     }
@@ -47,6 +58,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Moderation action failed" }, { status: 403 });
+    return handleApiError(err, { publicMessage: "Moderation action failed." });
   }
 }

@@ -1,13 +1,17 @@
 import { db } from "@/db";
 import { products, users } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { validateCsrfOrigin } from "@/lib/csrf";
 import { validateAndSanitizeUrl } from "@/lib/url-sanitizer";
 import { handleApiError } from "@/lib/errors";
 import { eq, and, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const createProductSchema = z.object({
   title: z.string().min(3).max(100),
@@ -70,28 +74,32 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized. Please log in with Discord." }, { status: 401 });
   }
 
-  const rate = checkRateLimit(`publish:${session.user.id}`, { maxRequests: 3, windowSeconds: 300 });
+  const csrf = validateCsrfOrigin(req);
+  if (!csrf.isValid) {
+    return csrf.errorResponse!;
+  }
+
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown_ip";
+  const rate = await checkRateLimitAsync(`publish:${session.user.id}:${clientIp}`, { maxRequests: 3, windowSeconds: 300 });
   if (!rate.allowed) {
-    return NextResponse.json({ error: "Rate limit exceeded. Please wait a few minutes before publishing again." }, { status: 429 });
+    return NextResponse.json({ error: "Rate limit exceeded. Please wait before submitting another digital asset." }, { status: 429 });
   }
 
   try {
     const body = await req.json();
     const parsed = createProductSchema.parse(body);
 
-    // Validate GitHub release URL strictly
     const releaseCheck = validateAndSanitizeUrl(parsed.githubReleaseUrl, { requireGitHubRelease: true });
     if (!releaseCheck.isValid) {
-      return NextResponse.json({ error: releaseCheck.error || "Invalid GitHub Release URL. Must link to an official GitHub release." }, { status: 400 });
+      return NextResponse.json({ error: releaseCheck.error || "Invalid GitHub Release URL. Must link to an official release." }, { status: 400 });
     }
 
     const productId = `prod_${nanoid(16)}`;
     const slug = `${parsed.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "asset"}-${nanoid(8)}`;
 
-    // Strictly enforce initial draft and pending moderation status
     await db.insert(products).values({
       id: productId,
       developerId: session.user.id,
@@ -121,6 +129,6 @@ export async function POST(req: NextRequest) {
       message: "Asset submitted successfully. It will become publicly visible once approved by a platform moderator.",
     });
   } catch (err: any) {
-    return handleApiError(err, { publicMessage: "Invalid product submission data." });
+    return handleApiError(err, { publicMessage: "Invalid digital asset submission data." });
   }
 }

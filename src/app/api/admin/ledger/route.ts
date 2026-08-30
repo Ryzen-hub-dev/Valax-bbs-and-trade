@@ -1,18 +1,29 @@
 import { requireAdmin } from "@/lib/rbac";
 import { executeLedgerTransaction } from "@/lib/ledger";
+import { validateCsrfOrigin } from "@/lib/csrf";
+import { handleApiError } from "@/lib/errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const ledgerAdjustSchema = z.object({
   targetUserId: z.string().min(1),
   amount: z.number().int(),
   reason: z.string().min(3),
-  confirmationCode: z.string().min(1), // Double confirmation protection
+  confirmationCode: z.string().min(1),
 });
 
 export async function POST(req: NextRequest) {
   try {
     const adminUser = await requireAdmin();
+
+    const csrf = validateCsrfOrigin(req);
+    if (!csrf.isValid) {
+      return csrf.errorResponse!;
+    }
+
     const body = await req.json();
     const { targetUserId, amount, reason, confirmationCode } = ledgerAdjustSchema.parse(body);
 
@@ -37,6 +48,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, newBalance: result.newBalance });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Ledger adjustment failed" }, { status: 403 });
+    return handleApiError(err, { publicMessage: "Ledger manual adjustment failed." });
   }
 }

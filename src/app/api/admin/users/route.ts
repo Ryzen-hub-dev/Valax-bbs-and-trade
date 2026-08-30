@@ -2,10 +2,15 @@ import { db } from "@/db";
 import { users, auditLogs } from "@/db/schema";
 import { requireAdmin } from "@/lib/rbac";
 import { revokeAllUserSessions } from "@/lib/auth";
+import { validateCsrfOrigin } from "@/lib/csrf";
+import { handleApiError } from "@/lib/errors";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const userActionSchema = z.object({
   targetUserId: z.string().min(1),
@@ -17,6 +22,12 @@ const userActionSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const adminUser = await requireAdmin();
+
+    const csrf = validateCsrfOrigin(req);
+    if (!csrf.isValid) {
+      return csrf.errorResponse!;
+    }
+
     const body = await req.json();
     const { targetUserId, action, role, reason } = userActionSchema.parse(body);
 
@@ -35,7 +46,6 @@ export async function POST(req: NextRequest) {
       await revokeAllUserSessions(targetUserId);
     }
 
-    // Write audit log
     await db.insert(auditLogs).values({
       id: `aud_${nanoid(16)}`,
       operatorId: adminUser.id,
@@ -47,6 +57,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Admin action failed" }, { status: 403 });
+    return handleApiError(err, { publicMessage: "Admin user operation failed." });
   }
 }
